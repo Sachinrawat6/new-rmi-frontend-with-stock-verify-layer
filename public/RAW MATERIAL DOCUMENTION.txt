@@ -1,0 +1,70 @@
+-----------------------------    RAW MATERIAL DOCUMENTAION   -----------------------------------
+
+1.ADD NEW STOCK : 
+	(i) Go to OPERATIONS section and click (Add Stock) button.
+	(ii) Enter fabric number which fabric you want to add stock.
+	(ii) Enter Stock quantity.
+	(iv) Enter Location.
+	(v) Click on Add Stock
+
+2.Ship Stock : 
+	(i) Go to OPERATIONS section and Click (Ship Stock) button.
+	(ii) Scan order id qr code.
+	(iii) Once fabric updated successfully scan new order id qr code and continue this process
+
+
+
+3.Create/Update Stock Details : 
+	(i) Go to BULK OPERATION section 
+	(ii) Click on Upload Stock 
+	(iii) Download Sample File
+	(iv) Open Google Sheet and search for (Fabric Average Sheet)
+	(v) Click on (Fabric Style Map) tab.
+	(vi) Copy (Fabric Name) , (Fabric #) and (Style #'s)
+	(vii) Paste google sheet copied data into downloaded sample file.
+	(viii) Upload this file.
+	
+	(ix) After uploading csv file new stock entry created/updated successfully.
+
+
+
+4. Add/Update Averages:
+	(i) Go to BULK OPERATION section. 
+	(ii) Click on (Upload Averages).
+	(iii) Download Sample File .
+	(iv) Open Google Sheet and search for (Fabric Average Sheet)
+	(v) Click on (Pattern Average) tab.
+	(vi) Copy Data from A3 OR you want add or update which averages.
+	(vii) Paste google sheet copied data into downloaded sample file.
+	(viii) Upload this file.
+
+
+
+5.Add/Update Style Numbers with Patterns :
+	(i) Go to BULK OPERATION section. 
+	(ii) Click on (Upload Fabric).
+	(iii) Download Sample File .
+	(iv) Open Google Sheet and search for (Fabric Average )
+	(v) Click on (Style-Pattern-Fabric Mapping) tab.
+	(vi) Copy Data from A2 OR you want add or update which style numbers.
+	(vii) Paste google sheet copied data into downloaded sample file.
+	(viii) Upload this file.
+
+
+6. Add/Update Averages Relations:
+	(i) Go to BULK OPERATION section. 
+	(ii) Click on (Upload Relations).
+	(iii) Download Sample File .
+	(iv) Open Google Sheet and search for (Purchase,Invoice , and Payment )
+	(v) Click on (Fabric) tab.
+	(vi) Copy Data you want add or update which fabric numbers meter and weight relationships.
+	(vii) Paste google sheet copied data into downloaded sample file.
+	(viii) Upload this file.
+
+
+7. Know about low stock: 
+	(i) Go to  Monitoring section. 
+	(ii) Click on (Low Stock Alert).
+	(iii) Download CSV file for detailed information.
+
+	

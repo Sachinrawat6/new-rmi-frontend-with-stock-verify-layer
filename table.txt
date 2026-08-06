@@ -1,0 +1,43 @@
+----------------TABLE 1 (picklist) ----------------------
+
+1.channel (Single Line Text)
+2 style_number (Number)
+3.size (Single Line Text)
+4.picklist_id (Number)
+5.brand (Single Line Text)
+6.color (Single Line Text)
+7.isSplit (Single Line Text)
+8.parentStyle (Number)
+
+
+
+-----------------TABLE 2 (picklist_response)--------------------
+1.channel (Single Line Text)
+2 style_number (Number)
+3.size (Single Line Text)
+4.picklist_id (Number)
+5.brand (Single Line Text)
+6.color (Single Line Text)
+7.isSplit (Single Line Text)
+8.parentStyle (Number)
+9.status(Single Line Text)
+10.employee_id (Number)
+11.scanned_timestamp (Date Time)
+1. channel (Single Line Text)
+2. style_number (Number)
+3. size (Single Line Text)
+4. picklist_id (Number)
+5. brand (Single Line Text)
+6. color (Single Line Text)
+7. isSplit (Single Line Text)
+8. parentStyle (Number)
+9. status (Single Line Text)
+10. employee_id (Number)
+11. scanned_timestamp (Date Time)
+
+---------------------TABLE 3 ( picklist_history)---------------------
+1.channel (Single Line Text)
+2.picklist_id (Number)
+3.sync_id (Number)
+
+Note: Please add system fields (CreatedAt , UpdatedAt)
