@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { BASE_URL } from '../constant/index.js';
 import axios from 'axios';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 
 /* ---------------------------------------------------------
    Custom Modal (replaces window.alert / window.confirm)
@@ -140,6 +140,7 @@ const Modal = ({
 };
 
 const StockLogRecords = () => {
+  const navigate = useNavigate();
   const [stockLogRecords, setStockLogRecords] = useState([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
@@ -503,6 +504,11 @@ const StockLogRecords = () => {
     });
   };
 
+  // Go back to previous page
+  const handleGoBack = useCallback(() => {
+    navigate(-1);
+  }, [navigate]);
+
   return (
     <div className="p-2 md:p-8">
       <div className="mx-auto w-full">
@@ -516,6 +522,8 @@ const StockLogRecords = () => {
                   <span className="inline-block h-8 w-1 rounded-full bg-indigo-600"></span>
                   Stock Records Verification
                 </h1>
+                {/* Back Button */}
+
                 <p className="mt-1 flex items-center gap-2 text-sm text-slate-500">
                   <svg
                     className="h-4 w-4"
@@ -533,12 +541,27 @@ const StockLogRecords = () => {
                   Verify and manage stock records
                 </p>
               </div>
-              <div className="flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-600">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
-                </span>
-                Live
+              <div>
+                <button
+                  onClick={handleGoBack}
+                  className="inline-flex items-center gap-2 rounded-lg bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 transition-all hover:bg-slate-200 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400/20 active:scale-95"
+                  title="Go Back"
+                >
+                  <svg
+                    className="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M10 19l-7-7m0 0l7-7m-7 7h18"
+                    />
+                  </svg>
+                  <span className="hidden sm:inline">Back</span>
+                </button>
               </div>
             </div>
 

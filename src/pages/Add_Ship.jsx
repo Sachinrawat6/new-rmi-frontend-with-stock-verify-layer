@@ -125,6 +125,14 @@ const Add_Ship = () => {
     }
   };
 
+  // cancel session
+  const cancelSession = () => {
+    const verify = window.confirm('Are you sure want to cancel this session');
+    if (!verify) return;
+    localStorage.removeItem(LOCAL_STORAGE_KEY);
+    window.location.reload();
+  };
+
   const handleOperationSelect = (operationValue) => {
     if (isLocked) {
       alert(`Cannot switch operations. Current session is locked to "${lockedOperation}".`);
@@ -253,12 +261,15 @@ const Add_Ship = () => {
                   {sessionId}...
                 </span>
               </div>
-              <button
-                onClick={endSession}
-                className="text-xs text-red-600 hover:text-red-700 font-medium px-3 py-1.5 hover:bg-red-50 rounded-lg transition-colors"
-              >
-                End
-              </button>
+              <div>
+                {' '}
+                <button
+                  onClick={cancelSession}
+                  className="bg-red-200 text-red-900 py-2 px-4 rounded-md hover:bg-red-300 duration-75 ease-in cursor-pointer"
+                >
+                  Cancel Session
+                </button>
+              </div>
             </div>
           )}
         </div>

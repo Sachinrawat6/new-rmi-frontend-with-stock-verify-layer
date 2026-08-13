@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import axios from 'axios';
 import { BASE_URL } from '../constant/index.js';
 import { NavLink, useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
 
 const StockLog = () => {
   const navigate = useNavigate();
@@ -9,11 +10,10 @@ const StockLog = () => {
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const [recordStatusCounts, setRecordStatusCounts] = useState({});
-  const [isFetchingStatuses, setIsFetchingStatuses] = useState(false);
-  const [autoApprovedIds, setAutoApprovedIds] = useState(new Set());
+  const [isAutoApproving, setIsAutoApproving] = useState(false);
+  const [hasAutoApproved, setHasAutoApproved] = useState(false);
 
-  // Optimized: Fetch only stock logs first (without statuses)
+  // Fetch stock logs only (no status fetching)
   const fetchStockLogs = useCallback(async (currentPage = 1) => {
     try {
       setLoading(true);
@@ -29,110 +29,75 @@ const StockLog = () => {
       setStockLogs(sortedLogs);
       setTotalPages(data.data.totalPages);
       setPage(data.data.currentPage);
-
-      // Extract session IDs
-      const ids = sortedLogs.map((session) => session.log_id);
-
-      // Fetch statuses in background (don't block UI)
-      if (ids.length > 0) {
-        await fetchAllSessionRecords(ids);
-      }
     } catch (error) {
       console.error(error);
-      alert('Failed to fetch stock logs');
+      toast.error('Failed to fetch stock logs');
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Optimized: Fetch records with chunking and caching
-  const fetchAllSessionRecords = useCallback(
-    async (ids) => {
-      if (ids.length === 0) return;
+  // Auto-Approve API Call - Only called on page load
+  const handleAutoApprove = useCallback(async () => {
+    // Don't run if already approved or currently approving
+    if (hasAutoApproved || isAutoApproving) return;
 
-      setIsFetchingStatuses(true);
-
-      try {
-        const CHUNK_SIZE = 5;
-        const statusCounts = {};
-        const updatePromises = [];
-        const newAutoApproved = new Set();
-
-        // Process in chunks
-        for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
-          const chunk = ids.slice(i, i + CHUNK_SIZE);
-
-          const chunkPromises = chunk.map((id) =>
-            axios
-              .get(`${BASE_URL}/verify-stocks/record/${id}?page=1&limit=1000`)
-              .then((response) => ({ id, response }))
-              .catch((error) => ({ id, error }))
-          );
-
-          const chunkResults = await Promise.all(chunkPromises);
-
-          // Process chunk results
-          chunkResults.forEach(({ id, response, error }) => {
-            if (error) {
-              statusCounts[id] = { pending: 0, approved: 0, rejected: 0, error: true };
-              return;
-            }
-
-            const stockRecords = response?.data?.data?.stockRecords || [];
-            const counts = { pending: 0, approved: 0, rejected: 0 };
-
-            stockRecords.forEach((record) => {
-              if (record.status === 'pending') counts.pending++;
-              else if (record.status === 'approved') counts.approved++;
-              else if (record.status === 'rejected') counts.rejected++;
-            });
-
-            statusCounts[id] = counts;
-
-            // Auto-approve if no pending records
-            const log = stockLogs.find((log) => log.log_id === id);
-            if (log && counts.pending === 0 && !log.approved) {
-              updatePromises.push(
-                updateStatus(log._id, true).then(() => {
-                  newAutoApproved.add(id);
-                })
-              );
-            }
-          });
-
-          // Update UI with chunk progress
-          setRecordStatusCounts((prev) => ({ ...prev, ...statusCounts }));
-        }
-
-        // Execute all update operations in parallel
-        if (updatePromises.length > 0) {
-          await Promise.all(updatePromises);
-          setAutoApprovedIds(newAutoApproved);
-
-          // Refresh logs to show updated status
-          await fetchStockLogs(page);
-        }
-
-        setRecordStatusCounts(statusCounts);
-      } catch (error) {
-        console.error('Error fetching records:', error);
-      } finally {
-        setIsFetchingStatuses(false);
-      }
-    },
-    [stockLogs, page, fetchStockLogs]
-  );
-
-  // Optimized: Update status with retry logic
-  const updateStatus = useCallback(async (id, approved) => {
     try {
-      await axios.put(`${BASE_URL}/stock-logs/${id}`, { approved });
-      return true;
+      setIsAutoApproving(true);
+
+      const response = await axios.post(`${BASE_URL}/stock-logs/auto-approve`);
+      const data = response.data;
+
+      // Check if it's a success response with statusCode 200
+      if (data.statusCode === 200 && data.success === true) {
+        const approvedCount = data.data?.approved || 0;
+        const message = data.data?.message || data.message || '';
+
+        // Only show toast if logs were actually approved (approved > 0)
+        if (approvedCount > 0) {
+          toast.success(`✅ ${approvedCount} logs auto-approved successfully!`);
+          // Refresh the page to show updated status
+          await fetchStockLogs(page);
+        } else {
+          // No logs approved - this is expected, don't show error
+          // Just log it for debugging
+          console.log('ℹ️ No eligible logs found:', message);
+        }
+      } else {
+        // This shouldn't happen with proper API, but handle just in case
+        toast.warning('Unexpected response from server');
+      }
     } catch (error) {
-      console.error('Error updating status:', error);
-      return false;
+      // Real error occurred (network, server error, etc.)
+      console.error('Auto-approve failed:', error);
+
+      // Handle different types of errors
+      if (error.response) {
+        // Server responded with error status
+        const status = error.response.status;
+        const data = error.response.data;
+
+        if (status === 404) {
+          toast.error('Auto-approve API not found. Please check the endpoint.');
+        } else if (status === 500) {
+          toast.error('Server error while auto-approving logs. Please try again.');
+        } else if (status === 400) {
+          toast.error(data?.message || 'Bad request. Please check the data.');
+        } else {
+          toast.error(data?.message || `Error ${status}: Failed to auto-approve logs`);
+        }
+      } else if (error.request) {
+        // Request made but no response (network error)
+        toast.error('Network error: Could not reach server. Please check your connection.');
+      } else {
+        // Something else happened
+        toast.error('An unexpected error occurred. Please try again.');
+      }
+    } finally {
+      setIsAutoApproving(false);
+      setHasAutoApproved(true);
     }
-  }, []);
+  }, [page, fetchStockLogs, hasAutoApproved, isAutoApproving]);
 
   // Helper function to format date - Memoized
   const formatDate = useCallback((dateString) => {
@@ -150,38 +115,12 @@ const StockLog = () => {
     });
   }, []);
 
-  // Get status display with counts - Memoized
-  const getStatusDisplay = useCallback(
-    (logId) => {
-      const counts = recordStatusCounts[logId];
-      if (!counts)
-        return {
-          display: isFetchingStatuses ? 'Loading...' : 'No records',
-          isFullyApproved: false,
-        };
-
-      const total = counts.pending + counts.approved + counts.rejected;
-      if (total === 0) return { display: 'No records', isFullyApproved: false };
-
-      const parts = [];
-      if (counts.pending > 0) parts.push(`${counts.pending} pending`);
-      if (counts.approved > 0) parts.push(`${counts.approved} approved`);
-      if (counts.rejected > 0) parts.push(`${counts.rejected} rejected`);
-
-      return {
-        display: parts.join(', '),
-        isFullyApproved: counts.pending === 0 && total > 0,
-        counts,
-      };
-    },
-    [recordStatusCounts, isFetchingStatuses]
-  );
-
-  // Handle page change - Fixed pagination
+  // Handle page change
   const handlePageChange = useCallback(
     (newPage) => {
       if (newPage >= 1 && newPage <= totalPages && newPage !== page) {
         setPage(newPage);
+        setHasAutoApproved(false); // Reset auto-approve flag on page change
       }
     },
     [page, totalPages]
@@ -194,14 +133,18 @@ const StockLog = () => {
 
   // Initial load and page changes
   useEffect(() => {
-    fetchStockLogs(page);
-  }, [page, fetchStockLogs]);
+    const loadData = async () => {
+      await fetchStockLogs(page);
+      // Auto-approve after fetching logs
+      await handleAutoApprove();
+    };
+
+    loadData();
+  }, [page]); // Only re-run when page changes
 
   // Memoize table rows for better performance
   const tableRows = useMemo(() => {
     return stockLogs.map((log, i) => {
-      const statusInfo = getStatusDisplay(log.log_id);
-      const isFullyApproved = statusInfo.isFullyApproved || autoApprovedIds.has(log.log_id);
       const rowBgClass = !log.approved
         ? 'bg-amber-50/30 hover:bg-amber-50/50'
         : 'hover:bg-slate-50/70';
@@ -239,7 +182,7 @@ const StockLog = () => {
             </span>
           </td>
           <td className="whitespace-nowrap px-3 py-3.5 text-center md:px-4 lg:px-6">
-            {isFullyApproved || log.approved ? (
+            {log.approved ? (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3.5 py-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-600/20">
                 <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
                   <path
@@ -248,7 +191,7 @@ const StockLog = () => {
                     clipRule="evenodd"
                   />
                 </svg>
-                Reviewed
+                Approved
               </span>
             ) : (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3.5 py-1.5 text-xs font-semibold text-amber-700 ring-1 ring-amber-600/20">
@@ -262,28 +205,6 @@ const StockLog = () => {
                 Pending
               </span>
             )}
-          </td>
-          <td className="whitespace-nowrap px-3 py-3.5 text-center text-sm text-slate-600 md:px-4 lg:px-6">
-            <div className="flex flex-col items-center gap-1">
-              <span className="text-xs font-medium">{statusInfo.display}</span>
-              {statusInfo.counts && (
-                <div className="flex gap-2 text-xs">
-                  {statusInfo.counts.pending > 0 && (
-                    <span className="text-amber-600 font-medium">
-                      P:{statusInfo.counts.pending}
-                    </span>
-                  )}
-                  {statusInfo.counts.approved > 0 && (
-                    <span className="text-emerald-600 font-medium">
-                      A:{statusInfo.counts.approved}
-                    </span>
-                  )}
-                  {statusInfo.counts.rejected > 0 && (
-                    <span className="text-red-600 font-medium">R:{statusInfo.counts.rejected}</span>
-                  )}
-                </div>
-              )}
-            </div>
           </td>
           <td className="whitespace-nowrap px-3 py-3.5 text-center text-sm text-slate-600 md:px-4 lg:px-6">
             {formatDate(log.createdAt)}
@@ -319,7 +240,7 @@ const StockLog = () => {
                 <span className="sm:hidden">View</span>
               </NavLink>
 
-              {isFullyApproved || log.approved ? (
+              {log.approved ? (
                 <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-2 py-1.5 text-xs font-medium text-emerald-600 md:px-3 md:py-2">
                   <svg className="h-3 w-3 md:h-4 md:w-4" fill="currentColor" viewBox="0 0 20 20">
                     <path
@@ -328,7 +249,7 @@ const StockLog = () => {
                       clipRule="evenodd"
                     />
                   </svg>
-                  <span className="hidden sm:inline">Auto-approved</span>
+                  <span className="hidden sm:inline">Approved</span>
                   <span className="sm:hidden">✓</span>
                 </span>
               ) : (
@@ -336,7 +257,7 @@ const StockLog = () => {
                   <svg
                     className="h-3 w-3 md:h-4 md:w-4 animate-pulse"
                     fill="currentColor"
-                    viewBox="0 0 20 20"
+                    viewBox="0 0 24 24"
                   >
                     <path
                       fillRule="evenodd"
@@ -353,7 +274,7 @@ const StockLog = () => {
         </tr>
       );
     });
-  }, [stockLogs, getStatusDisplay, autoApprovedIds, formatDate, page]);
+  }, [stockLogs, formatDate, page]);
 
   return (
     <div className="p-4 md:p-8 max-w-full">
@@ -363,6 +284,28 @@ const StockLog = () => {
           <div className="border-b border-slate-200/80 px-6 py-5 md:px-8 md:py-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-3">
+                {/* Back Button
+                <button
+                  onClick={handleGoBack}
+                  className="inline-flex items-center gap-2 rounded-lg bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 transition-all hover:bg-slate-200 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400/20 active:scale-95"
+                  title="Go Back"
+                >
+                  <svg
+                    className="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M10 19l-7-7m0 0l7-7m-7 7h18"
+                    />
+                  </svg>
+                  <span className="hidden sm:inline">Back</span>
+                </button> */}
+
                 <div>
                   <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-slate-800 md:text-3xl">
                     <span className="inline-block h-8 w-1 rounded-full bg-blue-600"></span>
@@ -382,14 +325,16 @@ const StockLog = () => {
                         d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
                       />
                     </svg>
-                    View and approve stock logs (Pending first)
+                    View and manage stock logs
                   </p>
                 </div>
               </div>
-              {isFetchingStatuses && (
-                <div className="flex items-center gap-2 text-sm text-blue-600">
-                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-600 border-t-transparent"></div>
-                  Loading statuses...
+
+              {/* Show loading indicator only when auto-approving */}
+              {isAutoApproving && (
+                <div className="flex items-center gap-2 text-sm text-green-600">
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-green-600 border-t-transparent"></div>
+                  Auto-approving...
                 </div>
               )}
             </div>
@@ -427,9 +372,6 @@ const StockLog = () => {
                           Status
                         </th>
                         <th className="whitespace-nowrap px-3 py-3.5 text-center text-xs font-semibold uppercase tracking-wider text-slate-600 md:px-4 lg:px-6">
-                          Records Status
-                        </th>
-                        <th className="whitespace-nowrap px-3 py-3.5 text-center text-xs font-semibold uppercase tracking-wider text-slate-600 md:px-4 lg:px-6">
                           Created At
                         </th>
                         <th className="whitespace-nowrap px-3 py-3.5 text-center text-xs font-semibold uppercase tracking-wider text-slate-600 md:px-4 lg:px-6">
@@ -443,7 +385,7 @@ const StockLog = () => {
                     <tbody className="divide-y divide-slate-100 bg-white">
                       {stockLogs.length === 0 ? (
                         <tr>
-                          <td colSpan={8} className="px-4 py-16 text-center">
+                          <td colSpan={7} className="px-4 py-16 text-center">
                             <div className="flex flex-col items-center gap-2">
                               <svg
                                 className="h-12 w-12 text-slate-300"
@@ -472,7 +414,7 @@ const StockLog = () => {
                 </div>
               </div>
 
-              {/* Pagination - Fixed */}
+              {/* Pagination */}
               <div className="border-t border-slate-200/80 px-4 py-4 md:px-6 md:py-5">
                 <div className="flex flex-col items-center justify-between gap-3 sm:flex-row">
                   <div className="flex items-center gap-2">
