@@ -1604,6 +1604,7 @@ const StockKeepingWithStyleNumber = ({ session }) => {
         source: session.source,
         width: formData.width?.toLowerCase(),
       };
+      console.log('payload', payloadForStockVerifyRecord);
 
       try {
         const response = await axios.post(`${BASE_URL}/verify-stocks`, payloadForStockVerifyRecord);

@@ -196,7 +196,7 @@ const StockLogRecords = () => {
       setLoading(true);
 
       const { data } = await axios.get(
-        `${BASE_URL}/verify-stocks/record/${session_id}?page=${currentPage}&limit=50`
+        `${BASE_URL}/verify-stocks/record/${session_id}?page=${currentPage}&limit=200`
       );
 
       setStockLogRecords(data.data.stockRecords);
