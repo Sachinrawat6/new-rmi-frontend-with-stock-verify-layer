@@ -308,6 +308,7 @@ const ProductionReport = () => {
             fabricNumber: st.fabricNumber,
             fabricName: st.fabricName,
             remainingStock: st.availableStock,
+            status: st.status,
           });
       });
     });
@@ -329,6 +330,7 @@ const ProductionReport = () => {
             reStock: item.remainingStock,
             totalMeter: 0,
             totalPieces: 0,
+            status: item.status,
           };
         else {
           fu[fn].fabricName = item.fabricName;
@@ -620,67 +622,236 @@ const ProductionReport = () => {
   }, [buildFabricUsage]);
 
   /* stock table PDF — respects daysFilter */
+  // const exportStockTablePDF = useCallback(() => {
+  //   if (!fabricUsageData) {
+  //     toast.error('No data. Generate report first.');
+  //     return;
+  //   }
+  //   const { numberOfDays } = fabricUsageData;
+  //   const threshold = daysFilter !== '' ? Number(daysFilter) : null;
+  //   if (stockTableRows.length === 0) {
+  //     toast.error('No fabric data matches the current filter.');
+  //     return;
+  //   }
+
+  //   const doc = new jsPDF(),
+  //     today = new Date(),
+  //     pw = doc.internal.pageSize.getWidth();
+  //   const isFiltered = threshold !== null && !isNaN(threshold) && threshold > 0;
+  //   const title = isFiltered
+  //     ? `STOCK SHORTFALL — NEXT ${threshold} DAYS`
+  //     : 'STOCK DAYS REPORT — ALL FABRICS';
+
+  //   doc.setFillColor(15, 23, 42);
+  //   doc.rect(0, 0, pw, isFiltered ? 42 : 36, 'F');
+  //   doc.setFontSize(15);
+  //   doc.setTextColor(255, 255, 255);
+  //   doc.text(title, pw / 2, 14, { align: 'center' });
+  //   doc.setFontSize(9);
+  //   doc.setTextColor(148, 163, 184);
+  //   doc.text(
+  //     `Generated: ${today.toLocaleString()}  |  Based on ${Math.round(numberOfDays)} day(s) of usage`,
+  //     pw / 2,
+  //     22,
+  //     { align: 'center' }
+  //   );
+  //   if (isFiltered) {
+  //     doc.setTextColor(251, 191, 36);
+  //     doc.text(
+  //       `Showing ${stockTableRows.length} fabric(s) with ≤ ${threshold} days remaining stock`,
+  //       pw / 2,
+  //       30,
+  //       { align: 'center' }
+  //     );
+  //   }
+
+  //   // legend
+  //   const ly = isFiltered ? 36 : 29;
+  //   doc.setFontSize(7);
+  //   doc.setFillColor(255, 220, 220);
+  //   doc.rect(14, ly, 8, 4, 'F');
+  //   doc.setTextColor(180, 30, 30);
+  //   doc.text('< 30 days', 24, ly + 3.5);
+  //   doc.setFillColor(255, 243, 205);
+  //   doc.rect(56, ly, 8, 4, 'F');
+  //   doc.setTextColor(146, 64, 14);
+  //   doc.text('30–59 days', 66, ly + 3.5);
+  //   doc.setFillColor(209, 250, 229);
+  //   doc.rect(104, ly, 8, 4, 'F');
+  //   doc.setTextColor(6, 95, 70);
+  //   doc.text('≥ 60 days', 114, ly + 3.5);
+
+  //   autoTable(doc, {
+  //     startY: isFiltered ? 46 : 39,
+  //     head: [
+  //       [
+  //         'S.No',
+  //         'Fabric No.',
+  //         'Fabric Name',
+  //         'Used (MTR)',
+  //         'Stock (MTR)',
+  //         'Daily (MTR/d)',
+  //         'Days Left',
+  //       ],
+  //     ],
+  //     body: stockTableRows.map(([fn, d], i) => [
+  //       i + 1,
+  //       fn,
+  //       d.fabricName || '—',
+  //       d.totalMeter.toFixed(2),
+  //       d.reStock === 0 ? '0.00' : Number(d.reStock).toFixed(2),
+  //       (d.dailyUsage || 0).toFixed(2),
+  //       d.daysOfStock !== null ? d.daysOfStock : '∞',
+  //     ]),
+  //     styles: { fontSize: 9, halign: 'center', cellPadding: 3 },
+  //     headStyles: { fillColor: [15, 23, 42], textColor: 255, fontStyle: 'bold', fontSize: 9 },
+  //     columnStyles: {
+  //       0: { cellWidth: 12 },
+  //       1: { cellWidth: 26 },
+  //       2: { halign: 'left', cellWidth: 52 },
+  //       3: { cellWidth: 22 },
+  //       4: { cellWidth: 22 },
+  //       5: { cellWidth: 22 },
+  //       6: { cellWidth: 20 },
+  //     },
+  //     didParseCell: (h) => {
+  //       if (h.section === 'body' && h.column.index === 6) {
+  //         const v = h.cell.raw;
+  //         if (v !== '∞') {
+  //           const d = Number(v);
+  //           if (d < 30) {
+  //             h.cell.styles.fillColor = [255, 220, 220];
+  //             h.cell.styles.textColor = [153, 27, 27];
+  //           } else if (d < 60) {
+  //             h.cell.styles.fillColor = [255, 243, 205];
+  //             h.cell.styles.textColor = [120, 53, 15];
+  //           } else {
+  //             h.cell.styles.fillColor = [209, 250, 229];
+  //             h.cell.styles.textColor = [6, 78, 59];
+  //           }
+  //         }
+  //       }
+  //     },
+  //     alternateRowStyles: { fillColor: [248, 250, 252] },
+  //   });
+  //   const pc = doc.internal.getNumberOfPages();
+  //   for (let i = 1; i <= pc; i++) {
+  //     doc.setPage(i);
+  //     doc.setFontSize(8);
+  //     doc.setTextColor(150, 150, 150);
+  //     doc.text(`Page ${i} of ${pc}`, pw / 2, doc.internal.pageSize.getHeight() - 8, {
+  //       align: 'center',
+  //     });
+  //   }
+  //   const fname = isFiltered
+  //     ? `Shortfall_Next${threshold}Days_${today.toISOString().split('T')[0]}.pdf`
+  //     : `Stock_Days_Report_${today.toISOString().split('T')[0]}.pdf`;
+  //   doc.save(fname);
+  // }, [fabricUsageData, stockTableRows, daysFilter]);
   const exportStockTablePDF = useCallback(() => {
     if (!fabricUsageData) {
       toast.error('No data. Generate report first.');
       return;
     }
+
     const { numberOfDays } = fabricUsageData;
+
     const threshold = daysFilter !== '' ? Number(daysFilter) : null;
-    if (stockTableRows.length === 0) {
-      toast.error('No fabric data matches the current filter.');
+
+    // status === false wale fabrics ko PDF se remove karo
+    console.log('stock table', stockTableRows);
+    const activeStockTableRows = stockTableRows.filter(([fn, d]) => d.status !== false);
+
+    if (activeStockTableRows.length === 0) {
+      toast.error('No active fabric data matches the current filter.');
       return;
     }
 
-    const doc = new jsPDF(),
-      today = new Date(),
-      pw = doc.internal.pageSize.getWidth();
+    const doc = new jsPDF();
+    const today = new Date();
+    const pw = doc.internal.pageSize.getWidth();
+
     const isFiltered = threshold !== null && !isNaN(threshold) && threshold > 0;
+
     const title = isFiltered
       ? `STOCK SHORTFALL — NEXT ${threshold} DAYS`
       : 'STOCK DAYS REPORT — ALL FABRICS';
 
+    // =========================
+    // HEADER
+    // =========================
+
     doc.setFillColor(15, 23, 42);
     doc.rect(0, 0, pw, isFiltered ? 42 : 36, 'F');
+
     doc.setFontSize(15);
     doc.setTextColor(255, 255, 255);
-    doc.text(title, pw / 2, 14, { align: 'center' });
+
+    doc.text(title, pw / 2, 14, {
+      align: 'center',
+    });
+
     doc.setFontSize(9);
     doc.setTextColor(148, 163, 184);
+
     doc.text(
       `Generated: ${today.toLocaleString()}  |  Based on ${Math.round(numberOfDays)} day(s) of usage`,
       pw / 2,
       22,
-      { align: 'center' }
+      {
+        align: 'center',
+      }
     );
+
     if (isFiltered) {
       doc.setTextColor(251, 191, 36);
+
       doc.text(
-        `Showing ${stockTableRows.length} fabric(s) with ≤ ${threshold} days remaining stock`,
+        `Showing ${activeStockTableRows.length} fabric(s) with ≤ ${threshold} days remaining stock`,
         pw / 2,
         30,
-        { align: 'center' }
+        {
+          align: 'center',
+        }
       );
     }
 
-    // legend
+    // =========================
+    // LEGEND
+    // =========================
+
     const ly = isFiltered ? 36 : 29;
+
     doc.setFontSize(7);
+
+    // < 30 days
     doc.setFillColor(255, 220, 220);
     doc.rect(14, ly, 8, 4, 'F');
+
     doc.setTextColor(180, 30, 30);
     doc.text('< 30 days', 24, ly + 3.5);
+
+    // 30–59 days
     doc.setFillColor(255, 243, 205);
     doc.rect(56, ly, 8, 4, 'F');
+
     doc.setTextColor(146, 64, 14);
     doc.text('30–59 days', 66, ly + 3.5);
+
+    // >= 60 days
     doc.setFillColor(209, 250, 229);
     doc.rect(104, ly, 8, 4, 'F');
+
     doc.setTextColor(6, 95, 70);
     doc.text('≥ 60 days', 114, ly + 3.5);
 
+    // =========================
+    // TABLE
+    // =========================
+
     autoTable(doc, {
       startY: isFiltered ? 46 : 39,
+
       head: [
         [
           'S.No',
@@ -692,31 +863,66 @@ const ProductionReport = () => {
           'Days Left',
         ],
       ],
-      body: stockTableRows.map(([fn, d], i) => [
+
+      body: activeStockTableRows.map(([fn, d], i) => [
         i + 1,
         fn,
         d.fabricName || '—',
-        d.totalMeter.toFixed(2),
-        d.reStock === 0 ? '0.00' : Number(d.reStock).toFixed(2),
-        (d.dailyUsage || 0).toFixed(2),
-        d.daysOfStock !== null ? d.daysOfStock : '∞',
+        Number(d.totalMeter || 0).toFixed(2),
+        d.reStock === 0 ? '0.00' : Number(d.reStock || 0).toFixed(2),
+        Number(d.dailyUsage || 0).toFixed(2),
+        d.daysOfStock !== null && d.daysOfStock !== undefined ? d.daysOfStock : '∞',
       ]),
-      styles: { fontSize: 9, halign: 'center', cellPadding: 3 },
-      headStyles: { fillColor: [15, 23, 42], textColor: 255, fontStyle: 'bold', fontSize: 9 },
-      columnStyles: {
-        0: { cellWidth: 12 },
-        1: { cellWidth: 26 },
-        2: { halign: 'left', cellWidth: 52 },
-        3: { cellWidth: 22 },
-        4: { cellWidth: 22 },
-        5: { cellWidth: 22 },
-        6: { cellWidth: 20 },
+
+      styles: {
+        fontSize: 9,
+        halign: 'center',
+        cellPadding: 3,
       },
+
+      headStyles: {
+        fillColor: [15, 23, 42],
+        textColor: 255,
+        fontStyle: 'bold',
+        fontSize: 9,
+      },
+
+      columnStyles: {
+        0: {
+          cellWidth: 12,
+        },
+        1: {
+          cellWidth: 26,
+        },
+        2: {
+          halign: 'left',
+          cellWidth: 52,
+        },
+        3: {
+          cellWidth: 22,
+        },
+        4: {
+          cellWidth: 22,
+        },
+        5: {
+          cellWidth: 22,
+        },
+        6: {
+          cellWidth: 20,
+        },
+      },
+
+      // =========================
+      // DAYS LEFT COLOR
+      // =========================
+
       didParseCell: (h) => {
         if (h.section === 'body' && h.column.index === 6) {
           const v = h.cell.raw;
+
           if (v !== '∞') {
             const d = Number(v);
+
             if (d < 30) {
               h.cell.styles.fillColor = [255, 220, 220];
               h.cell.styles.textColor = [153, 27, 27];
@@ -730,23 +936,41 @@ const ProductionReport = () => {
           }
         }
       },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
+
+      alternateRowStyles: {
+        fillColor: [248, 250, 252],
+      },
     });
+
+    // =========================
+    // PAGE NUMBERS
+    // =========================
+
     const pc = doc.internal.getNumberOfPages();
+
     for (let i = 1; i <= pc; i++) {
       doc.setPage(i);
+
       doc.setFontSize(8);
       doc.setTextColor(150, 150, 150);
+
       doc.text(`Page ${i} of ${pc}`, pw / 2, doc.internal.pageSize.getHeight() - 8, {
         align: 'center',
       });
     }
+
+    // =========================
+    // FILE NAME
+    // =========================
+
+    const dateString = today.toISOString().split('T')[0];
+
     const fname = isFiltered
-      ? `Shortfall_Next${threshold}Days_${today.toISOString().split('T')[0]}.pdf`
-      : `Stock_Days_Report_${today.toISOString().split('T')[0]}.pdf`;
+      ? `Shortfall_Next${threshold}Days_${dateString}.pdf`
+      : `Stock_Days_Report_${dateString}.pdf`;
+
     doc.save(fname);
   }, [fabricUsageData, stockTableRows, daysFilter]);
-
   const clearFilters = useCallback(() => {
     setChannelFilter('');
     setDateFrom('');

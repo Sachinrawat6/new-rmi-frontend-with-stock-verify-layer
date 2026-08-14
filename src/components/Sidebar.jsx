@@ -180,6 +180,12 @@ const Sidebar = ({ isAuthenticated, user, setUser, onLogout }) => {
           path: '/overwrite-style-status',
           category: 'Monitoring',
         },
+        {
+          name: 'Blocked Stocks Days',
+          icon: FaSync,
+          path: '/blocked-stocks-days',
+          category: 'Monitoring',
+        },
       ],
 
       // Super Admin additional links

@@ -56,6 +56,8 @@ const StockUploaderCSV = () => {
             .map((row) => {
               const fabricNumber = Number(row['Fabric #']) || null;
               const fabricName = row['Fabric Name']?.trim() || '';
+              const vendor_source = row['Vendor Source']?.trim() || '';
+              const blocked_stock_days = row['Blocked Stock Days'] || 7;
 
               // Skip if fabricNumber missing
               if (!fabricNumber) return null;
@@ -71,6 +73,8 @@ const StockUploaderCSV = () => {
                 fabricNumber,
                 fabricName,
                 styleNumbers,
+                vendor_source,
+                blocked_stock_days,
               };
             })
             .filter(Boolean); // remove null entries

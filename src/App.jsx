@@ -40,6 +40,7 @@ import StockLog from './pages/StockLog';
 import StockLogRecords from './pages/StockLogRecords';
 import Session from './components/Session';
 import UserManagement from './pages/WhitelistedUserManagement';
+import BlockedStockDays from './pages/BlockedStockDays';
 
 const AppContent = () => {
   const { user, setUser } = useGlobalContext();
@@ -356,6 +357,14 @@ const AppContent = () => {
             element={
               <ProtectedRoute user={user}>
                 <OverwriteStylesManager />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/blocked-stocks-days"
+            element={
+              <ProtectedRoute user={user}>
+                <BlockedStockDays />
               </ProtectedRoute>
             }
           />

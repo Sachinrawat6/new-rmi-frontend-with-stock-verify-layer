@@ -156,7 +156,7 @@ const StyleNumber = () => {
       const fabrics = [];
       // collect up to 3 fabrics
       for (let i = 1; i < 4; i++) {
-        if (`fabric_${i}_no`) {
+        if (style[`fabric_${i}_no`]) {
           fabrics.push({
             fabric_no: Number(style[`fabric_${i}_no`]) || null,
             fabric_name: style[`fabric_${i}_name`] || '',
