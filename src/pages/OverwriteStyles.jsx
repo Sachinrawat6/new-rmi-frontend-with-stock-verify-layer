@@ -9,6 +9,7 @@ import {
   Circle,
   CircleDot,
   Upload,
+  Download,
   ChevronLeft,
   ChevronRight,
   X,
@@ -33,6 +34,7 @@ import { OVERWRITE_BASE_URL } from '../constant/index.js';
 const BATCH_SIZE = 50;
 const MAX_RECORDS = 4000;
 const TOAST_DURATION = 3500;
+const EXPORT_FETCH_LIMIT = 10000; // large enough to grab all live/zero rows in one shot
 
 /* ------------------------------------------------------------------
    API Service
@@ -186,10 +188,15 @@ const StatusUpdateModal = ({
   styleNumber,
   currentStatus,
   selectedCount,
+  presetField,
+  presetValue,
   loading,
 }) => {
   const [selectedName, setSelectedName] = useState('');
-  const [selectedStatus, setSelectedStatus] = useState('');
+  // Just 2 toggles now instead of 4 separate status buttons.
+  // isLiveOn / isZeroOn are mutually exclusive — turning one on turns the other off.
+  const [isLiveOn, setIsLiveOn] = useState(false);
+  const [isZeroOn, setIsZeroOn] = useState(false);
 
   // User list with specified names
   const userList = [
@@ -199,21 +206,35 @@ const StatusUpdateModal = ({
     { id: 'user4', name: 'Mam' },
   ];
 
-  // Reset state when modal opens
+  // Reset / prefill state whenever the modal opens
   useEffect(() => {
-    if (isOpen) {
-      setSelectedName('');
-      setSelectedStatus('');
+    if (!isOpen) return;
+
+    setSelectedName('');
+
+    if (presetField === 'isLive') {
+      setIsLiveOn(!!presetValue);
+      setIsZeroOn(false);
+    } else if (presetField === 'isZero') {
+      setIsZeroOn(!!presetValue);
+      setIsLiveOn(false);
+    } else if (currentStatus === 'Live') {
+      setIsLiveOn(true);
+      setIsZeroOn(false);
+    } else if (currentStatus === 'Zero') {
+      setIsZeroOn(true);
+      setIsLiveOn(false);
+    } else {
+      setIsLiveOn(false);
+      setIsZeroOn(false);
     }
-  }, [isOpen]);
+  }, [isOpen, presetField, presetValue, currentStatus]);
 
   if (!isOpen) return null;
 
   const handleConfirm = () => {
-    if (!selectedName || !selectedStatus) {
-      return;
-    }
-    onConfirm(selectedName, selectedStatus);
+    if (!selectedName) return;
+    onConfirm(selectedName, { isLive: isLiveOn, isZero: isZeroOn });
   };
 
   const isBulk = selectedCount > 1;
@@ -234,12 +255,21 @@ const StatusUpdateModal = ({
     }
   };
 
-  const statusOptions = [
-    { id: 'live', label: 'Live', icon: Zap, color: 'emerald' },
-    { id: 'not-live', label: 'Not Live', icon: ZapOff, color: 'slate' },
-    { id: 'zero', label: 'Zero', icon: CircleDot, color: 'red' },
-    { id: 'not-zero', label: 'Not Zero', icon: Circle, color: 'slate' },
-  ];
+  const toggleLive = () => {
+    setIsLiveOn((prev) => {
+      const next = !prev;
+      if (next) setIsZeroOn(false);
+      return next;
+    });
+  };
+
+  const toggleZero = () => {
+    setIsZeroOn((prev) => {
+      const next = !prev;
+      if (next) setIsLiveOn(false);
+      return next;
+    });
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
@@ -275,39 +305,38 @@ const StatusUpdateModal = ({
         </div>
 
         <div className="space-y-5">
-          {/* Status Selection */}
+          {/* Status Toggles (2 buttons instead of 4) */}
           <div>
-            <label className="block text-sm font-semibold text-[#1A2233] mb-2">
-              Select New Status
-            </label>
+            <label className="block text-sm font-semibold text-[#1A2233] mb-2">Set Status</label>
             <div className="grid grid-cols-2 gap-2">
-              {statusOptions.map(({ id, label, icon: Icon, color }) => {
-                const isSelected = selectedStatus === id;
-                const colorClasses = {
-                  emerald: isSelected
+              <button
+                onClick={toggleLive}
+                className={`px-3 py-2.5 rounded-lg border-2 text-sm font-semibold transition-all duration-200 flex items-center justify-center gap-1.5 ${
+                  isLiveOn
                     ? 'border-emerald-500 bg-emerald-50 text-emerald-700 ring-2 ring-emerald-400 ring-offset-1'
-                    : 'border-[#DDE1EA] text-[#5B6478] hover:border-emerald-300 hover:bg-emerald-50/50',
-                  red: isSelected
+                    : 'border-[#DDE1EA] text-[#5B6478] hover:border-emerald-300 hover:bg-emerald-50/50'
+                }`}
+              >
+                {isLiveOn ? <Zap size={16} /> : <ZapOff size={16} />}
+                {isLiveOn ? 'Live' : 'Not Live'}
+                {isLiveOn && <Check size={14} className="ml-1" />}
+              </button>
+              <button
+                onClick={toggleZero}
+                className={`px-3 py-2.5 rounded-lg border-2 text-sm font-semibold transition-all duration-200 flex items-center justify-center gap-1.5 ${
+                  isZeroOn
                     ? 'border-red-500 bg-red-50 text-red-700 ring-2 ring-red-400 ring-offset-1'
-                    : 'border-[#DDE1EA] text-[#5B6478] hover:border-red-300 hover:bg-red-50/50',
-                  slate: isSelected
-                    ? 'border-slate-500 bg-slate-50 text-slate-700 ring-2 ring-slate-400 ring-offset-1'
-                    : 'border-[#DDE1EA] text-[#5B6478] hover:border-slate-300 hover:bg-slate-50/50',
-                };
-
-                return (
-                  <button
-                    key={id}
-                    onClick={() => setSelectedStatus(id)}
-                    className={`px-3 py-2.5 rounded-lg border-2 text-sm font-semibold transition-all duration-200 flex items-center justify-center gap-1.5 ${colorClasses[color]}`}
-                  >
-                    <Icon size={16} />
-                    {label}
-                    {isSelected && <Check size={14} className="ml-1" />}
-                  </button>
-                );
-              })}
+                    : 'border-[#DDE1EA] text-[#5B6478] hover:border-red-300 hover:bg-red-50/50'
+                }`}
+              >
+                {isZeroOn ? <CircleDot size={16} /> : <Circle size={16} />}
+                {isZeroOn ? 'Zero' : 'Not Zero'}
+                {isZeroOn && <Check size={14} className="ml-1" />}
+              </button>
             </div>
+            <p className="text-xs text-[#5B6478] mt-1.5">
+              Tap to toggle — turning one on turns the other off.
+            </p>
           </div>
 
           {/* User Selection - Dropdown */}
@@ -349,7 +378,7 @@ const StatusUpdateModal = ({
             </button>
             <button
               onClick={handleConfirm}
-              disabled={!selectedName || !selectedStatus || loading}
+              disabled={!selectedName || loading}
               className="flex-1 rounded-lg bg-gradient-to-r from-[#D98E31] to-[#E8A84A] px-4 py-2.5 text-sm font-bold text-white transition-all hover:shadow-lg hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
             >
               {loading ? (
@@ -401,6 +430,9 @@ const OverwriteStylesManager = () => {
   const [csvBusy, setCsvBusy] = useState(false);
   const [csvPreview, setCsvPreview] = useState([]);
   const [csvProgress, setCsvProgress] = useState({ current: 0, total: 0 });
+
+  // Export state (exports styles that were manually set Live or Zero)
+  const [exportBusy, setExportBusy] = useState(false);
 
   // Status Update Modal State
   const [showStatusModal, setShowStatusModal] = useState(false);
@@ -522,44 +554,18 @@ const OverwriteStylesManager = () => {
     setShowStatusModal(true);
   };
 
-  // Handle status update confirmation
-  const handleStatusConfirm = async (updatedBy, selectedStatus) => {
+  // Handle status update confirmation — statusValues is { isLive, isZero } from the 2 toggles
+  const handleStatusConfirm = async (updatedBy, statusValues) => {
     setModalLoading(true);
 
     try {
       const { row, selectedCount } = modalConfig;
 
-      let actualField = '';
-      let actualValue = false;
-
-      if (selectedStatus) {
-        switch (selectedStatus) {
-          case 'live':
-            actualField = 'isLive';
-            actualValue = true;
-            break;
-          case 'not-live':
-            actualField = 'isLive';
-            actualValue = false;
-            break;
-          case 'zero':
-            actualField = 'isZero';
-            actualValue = true;
-            break;
-          case 'not-zero':
-            actualField = 'isZero';
-            actualValue = false;
-            break;
-          default:
-            break;
-        }
-      }
-
-      const updates = { [actualField]: actualValue };
-      if (actualField === 'isLive' && actualValue === true) updates.isZero = false;
-      if (actualField === 'isZero' && actualValue === true) updates.isLive = false;
-
-      updates.updated_by = updatedBy;
+      const updates = {
+        isLive: statusValues.isLive,
+        isZero: statusValues.isZero,
+        updated_by: updatedBy,
+      };
 
       if (selectedCount === 1 && row) {
         const result = await apiService.updateStyleByNumber(row.style_number, updates);
@@ -794,6 +800,72 @@ const OverwriteStylesManager = () => {
     }
   }, [csvData, processBatches, fetchStyles, notify]);
 
+  // Export styles that were manually marked Live or Zero, as a CSV download.
+  // Fetches isLive=true and isZero=true separately (they're mutually exclusive
+  // in the data model, so a simple union covers every "manually touched" style)
+  // and merges by _id in case the backend ever overlaps them.
+  const exportStyles = useCallback(async () => {
+    setExportBusy(true);
+    try {
+      const [liveRes, zeroRes] = await Promise.all([
+        apiService.getStyles({ isLive: 'true', page: '1', limit: String(EXPORT_FETCH_LIMIT) }),
+        apiService.getStyles({ isZero: 'true', page: '1', limit: String(EXPORT_FETCH_LIMIT) }),
+      ]);
+
+      const liveRows = Array.isArray(liveRes.data) ? liveRes.data : [];
+      const zeroRows = Array.isArray(zeroRes.data) ? zeroRes.data : [];
+
+      const merged = new Map();
+      [...liveRows, ...zeroRows].forEach((r) => merged.set(r._id, r));
+      const exportRows = Array.from(merged.values()).sort(
+        (a, b) => a.style_number - b.style_number
+      );
+
+      if (exportRows.length === 0) {
+        notify('info', 'No manually Live or Zero styles to export');
+        return;
+      }
+
+      const escapeCsv = (val) => {
+        const str = String(val ?? '');
+        return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+      };
+
+      const header = ['style_number', 'status', 'updated_by', 'updatedAt'];
+      const lines = exportRows.map((r) => {
+        const status = r.isLive ? 'Live' : r.isZero ? 'Zero' : '';
+        return [
+          r.style_number,
+          status,
+          r.updated_by || '',
+          r.updatedAt ? new Date(r.updatedAt).toISOString() : '',
+        ]
+          .map(escapeCsv)
+          .join(',');
+      });
+
+      const csvContent = [header.join(','), ...lines].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute(
+        'download',
+        `live-zero-styles_${new Date().toISOString().slice(0, 10)}.csv`
+      );
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      notify('success', `Exported ${exportRows.length} manually Live/Zero styles`);
+    } catch (e) {
+      notify('error', `Export failed: ${e.message}`);
+    } finally {
+      setExportBusy(false);
+    }
+  }, [notify]);
+
   // Get row background color based on status
   const getRowBackground = (isLive, isZero) => {
     if (isLive) return 'bg-emerald-50/50 hover:bg-emerald-50';
@@ -822,6 +894,8 @@ const OverwriteStylesManager = () => {
         styleNumber={modalConfig.styleNumber}
         currentStatus={modalConfig.currentStatus}
         selectedCount={modalConfig.selectedCount}
+        presetField={modalConfig.field}
+        presetValue={modalConfig.value}
         loading={modalLoading}
       />
 
@@ -846,6 +920,15 @@ const OverwriteStylesManager = () => {
             >
               <RefreshCw size={16} className={loading ? 'spin' : ''} />
               Refresh
+            </button>
+            <button
+              onClick={exportStyles}
+              disabled={exportBusy}
+              className="inline-flex items-center gap-2 rounded-lg border border-[#DDE1EA] bg-white px-4 py-2.5 text-sm font-semibold text-[#5B6478] transition-all hover:bg-[#F5F6F9] hover:border-[#C8CDD8] disabled:opacity-50"
+              title="Export styles manually set Live or Zero"
+            >
+              {exportBusy ? <Loader2 size={16} className="spin" /> : <Download size={16} />}
+              Export
             </button>
             <button
               onClick={() => setShowCsvUpload(true)}

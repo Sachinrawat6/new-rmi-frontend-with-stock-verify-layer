@@ -9,17 +9,20 @@ import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { BASE_URL } from '../constant/index.js';
 
-// const BASE_URL = 'https://raw-material-backend.onrender.com';
 const CHANNELS = ['Myntra', 'Nykaa', 'Ajio', 'Tatacliq', 'Shopify'];
 
 /* ─────────────────────────── Helpers ─────────────────────────── */
 
-const sortByDaysAsc = (entries) =>
+// Sort by shortfall (descending - highest first)
+const sortByShortfallDesc = (entries) =>
   [...entries].sort(([, a], [, b]) => {
-    if (a.daysOfStock === null && b.daysOfStock === null) return 0;
-    if (a.daysOfStock === null) return 1; // ∞ → bottom
-    if (b.daysOfStock === null) return -1;
-    return a.daysOfStock - b.daysOfStock;
+    return (b.shortfall || 0) - (a.shortfall || 0);
+  });
+
+// Sort by total used fabric (descending - highest first)
+const sortByUsedFabricDesc = (entries) =>
+  [...entries].sort(([, a], [, b]) => {
+    return (b.totalMeter || 0) - (a.totalMeter || 0);
   });
 
 /* ─────────────────────────── Sub-components ──────────────────── */
@@ -77,43 +80,6 @@ const Btn = ({
   );
 };
 
-// stock prop = actual remaining stock value (to distinguish true 0-stock vs rounding to 0)
-const DaysBadge = ({ days, stock }) => {
-  if (days === null || days === undefined)
-    return <span className="text-slate-400 font-semibold text-xs">∞</span>;
-  // Only show "Out of stock" when actual stock is genuinely 0
-  if (Number(stock) === 0)
-    return (
-      <span className="bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-lg">
-        Out of stock
-      </span>
-    );
-  // days rounds to 0 but stock > 0 means less than 1 day remaining
-  if (days === 0)
-    return (
-      <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded-lg">
-        &lt; 1d
-      </span>
-    );
-  if (days < 30)
-    return (
-      <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded-lg">
-        {days}d
-      </span>
-    );
-  if (days < 60)
-    return (
-      <span className="bg-amber-100 text-amber-700 text-xs font-bold px-2 py-0.5 rounded-lg">
-        {days}d
-      </span>
-    );
-  return (
-    <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-0.5 rounded-lg">
-      {days}d
-    </span>
-  );
-};
-
 /* ─────────────────────────── Main ────────────────────────────── */
 const ProductionReport = () => {
   const { stock, stockLoading, fetchMeterAndKgRelationShip, meterAndKG, styleLoading } =
@@ -132,7 +98,9 @@ const ProductionReport = () => {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [fabricUsageData, setFabricUsageData] = useState(null);
   const [activeTab, setActiveTab] = useState('sync-log');
-  const [daysFilter, setDaysFilter] = useState(''); // '' = all, number = shortfall within N days
+  const [daysFilter, setDaysFilter] = useState('30');
+  const [vendorFilter, setVendorFilter] = useState('');
+  const [sortBy, setSortBy] = useState('used');
 
   const exportMenuRef = useRef(null);
 
@@ -150,6 +118,8 @@ const ProductionReport = () => {
   useEffect(() => {
     fetchMeterAndKgRelationShip();
   }, []);
+
+  console.log('stock ', stock);
 
   useEffect(() => {
     (async () => {
@@ -279,9 +249,10 @@ const ProductionReport = () => {
     setShowExportMenu(true);
   }, [productionStyles, averageData]);
 
-  /* shared fabric-usage builder */
+  /* shared fabric-usage builder with blocked_stock_days support */
   const buildFabricUsage = useCallback(() => {
     if (!productionStyles?.length || !averageData?.length || !stock?.length) return null;
+
     const getAvg = (size, fab) => {
       if (!fab) return 0;
       const s = String(size).toUpperCase();
@@ -292,6 +263,7 @@ const ProductionReport = () => {
       if (['4XL', '5XL'].includes(s)) return fab.average_4xl_5xl || 0;
       return 0;
     };
+
     let numberOfDays = 7;
     if (dateFrom && dateTo) {
       numberOfDays = Math.max(1, (new Date(dateTo) - new Date(dateFrom)) / 86400000);
@@ -299,52 +271,81 @@ const ProductionReport = () => {
       const ts = filteredData.map((r) => new Date(r.createdAt).getTime()).filter(Boolean);
       if (ts.length > 1) numberOfDays = Math.max(1, (Math.max(...ts) - Math.min(...ts)) / 86400000);
     }
+
     const combined = [];
     productionStyles.forEach((ps) => {
       stock.forEach((st) => {
-        if (Array.isArray(st.styleNumbers) && st.styleNumbers.includes(ps.style_number))
+        const styleNum = String(ps.style_number);
+        const matches =
+          Array.isArray(st.styleNumbers) && st.styleNumbers.some((sn) => String(sn) === styleNum);
+        if (matches) {
           combined.push({
             ...ps,
             fabricNumber: st.fabricNumber,
             fabricName: st.fabricName,
-            remainingStock: st.availableStock,
+            remainingStock: st.availableStock || 0,
             status: st.status,
+            vendor_source: st.vendor_source || 'Unknown',
+            blocked_stock_days: st.blocked_stock_days || 0,
           });
+        }
       });
     });
+
     const withAvg = [];
     combined.forEach((ac) => {
       averageData.forEach((avg) => {
-        if (avg.style_number === ac.style_number)
+        if (String(avg.style_number) === String(ac.style_number))
           withAvg.push({ ...ac, fabrics: avg.fabrics || [] });
       });
     });
+
     const fu = {};
     withAvg.forEach((item) => {
       item.fabrics.forEach((fab) => {
-        const fn = item.fabricNumber;
+        const fn = String(item.fabricNumber);
         const m = getAvg(item.size, fab);
-        if (!fu[fn])
+        if (!fu[fn]) {
           fu[fn] = {
-            fabricName: item.fabricName,
-            reStock: item.remainingStock,
+            fabricName: item.fabricName || 'Unknown',
+            reStock: Number(item.remainingStock) || 0,
             totalMeter: 0,
             totalPieces: 0,
             status: item.status,
+            vendor_source: item.vendor_source || 'Unknown',
+            blocked_stock_days: Number(item.blocked_stock_days) || 0,
+            styleNumbers: [],
+            dailyUsage: 0,
+            daysOfStock: null,
+            shortfall: 0,
           };
-        else {
-          fu[fn].fabricName = item.fabricName;
-          fu[fn].reStock = item.remainingStock;
+        } else {
+          fu[fn].reStock = Number(item.remainingStock) || 0;
+          fu[fn].vendor_source = item.vendor_source || 'Unknown';
+          fu[fn].blocked_stock_days = Number(item.blocked_stock_days) || 0;
         }
         fu[fn].totalMeter += m;
         fu[fn].totalPieces += 1;
+        if (!fu[fn].styleNumbers.includes(String(item.style_number))) {
+          fu[fn].styleNumbers.push(String(item.style_number));
+        }
       });
     });
+
     Object.values(fu).forEach((d) => {
       const daily = d.totalMeter / numberOfDays;
-      d.daysOfStock = daily > 0 ? Math.round(Number(d.reStock) / daily) : null;
+      const reStock = Number(d.reStock) || 0;
+
       d.dailyUsage = daily;
+
+      // Calculate days of stock
+      if (daily > 0) {
+        d.daysOfStock = Math.round(reStock / daily);
+      } else {
+        d.daysOfStock = null;
+      }
     });
+
     return { fabricUsage: fu, numberOfDays };
   }, [productionStyles, averageData, stock, filteredData, dateFrom, dateTo]);
 
@@ -357,20 +358,143 @@ const ProductionReport = () => {
     setFabricUsageData(buildFabricUsage());
   }, [productionStyles, buildFabricUsage]);
 
-  /* stock table rows — filtered by daysFilter + sorted by daysOfStock asc */
-  const stockTableRows = useMemo(() => {
+  /* Get only fabrics with shortfall > 0 */
+  const shortfallFabrics = useMemo(() => {
     if (!fabricUsageData) return [];
-    const threshold = daysFilter !== '' ? Number(daysFilter) : null;
-    const entries = Object.entries(fabricUsageData.fabricUsage).filter(([, d]) => {
-      if (threshold === null || isNaN(threshold) || threshold <= 0) return true;
-      if (d.daysOfStock === null) return false; // infinite stock → not in shortfall
-      return d.daysOfStock <= threshold;
+    const threshold = daysFilter !== '' ? Number(daysFilter) : 30;
+
+    let entries = Object.entries(fabricUsageData.fabricUsage).filter(([, d]) => {
+      if (vendorFilter && d.vendor_source !== vendorFilter) return false;
+      if (d.status === false) return false;
+      return true;
     });
-    return sortByDaysAsc(entries);
-  }, [fabricUsageData, daysFilter]);
 
-  /* ── PDFs ──────────────────────────────────────────────── */
+    // Calculate shortfall and filter only those with shortfall > 0
+    entries = entries
+      .map(([fn, d]) => {
+        const dailyUsage = d.dailyUsage || 0;
+        const availableStock = Number(d.reStock) || 0;
+        const blockedDays = Number(d.blocked_stock_days) || 0;
 
+        // A fabric only needs to survive until fresh stock can actually land.
+        // If this fabric's blocked (lead-time) period is shorter than the
+        // selected forecast window, cap the projection at the blocked days -
+        // projecting usage past that point overstates the shortfall, since
+        // new stock arrives once the blocked period ends.
+        const effectiveDays = blockedDays > 0 ? Math.min(threshold, blockedDays) : threshold;
+
+        // Fabric needed for the effective period
+        const usageInThreshold = dailyUsage * effectiveDays;
+
+        // Shortfall = Needed - Available Stock
+        const shortfall = Math.max(0, usageInThreshold - availableStock);
+
+        // Days of stock based on available stock and daily usage
+        const daysOfStock = dailyUsage > 0 ? Math.round(availableStock / dailyUsage) : null;
+
+        return [
+          fn,
+          {
+            ...d,
+            shortfall,
+            daysOfStock,
+            usageInThreshold,
+            effectiveDays,
+            blockedDays: blockedDays, // Each fabric's actual blocked days
+          },
+        ];
+      })
+      // Only keep fabrics with shortfall > 0
+      .filter(([, d]) => d.shortfall > 0);
+
+    // Apply sorting
+    if (sortBy === 'used') {
+      entries = sortByUsedFabricDesc(entries);
+    } else {
+      entries = sortByShortfallDesc(entries);
+    }
+
+    return entries;
+  }, [fabricUsageData, daysFilter, vendorFilter, sortBy]);
+
+  /* vendor-wise shortfall rows - only fabrics with shortfall > 0 */
+  const vendorShortfallRows = useMemo(() => {
+    if (!fabricUsageData) return {};
+    const threshold = daysFilter !== '' ? Number(daysFilter) : 30;
+    const useMostUsedSort = sortBy === 'used';
+
+    const vendorMap = {};
+    Object.entries(fabricUsageData.fabricUsage).forEach(([fn, d]) => {
+      if (d.status === false) return;
+      if (vendorFilter && d.vendor_source !== vendorFilter) return;
+
+      const blockedDays = Number(d.blocked_stock_days) || 0;
+      const dailyUsage = d.dailyUsage || 0;
+      const availableStock = Number(d.reStock) || 0;
+
+      // Same fix as shortfallFabrics: cap the projection window at this
+      // fabric's blocked/lead-time days when that's shorter than the
+      // selected forecast threshold, so we don't over-project usage past
+      // the point new stock actually becomes available.
+      const effectiveDays = blockedDays > 0 ? Math.min(threshold, blockedDays) : threshold;
+
+      // Fabric needed for the effective period
+      const usageInThreshold = dailyUsage * effectiveDays;
+
+      // Shortfall = Needed - Available Stock
+      const shortfallMeters = Math.max(0, usageInThreshold - availableStock);
+
+      // Only include if shortfall > 0
+      if (shortfallMeters <= 0) return;
+
+      const vendor = d.vendor_source || 'Unknown';
+      if (!vendorMap[vendor]) {
+        vendorMap[vendor] = [];
+      }
+
+      // Days of stock
+      const daysOfStock = dailyUsage > 0 ? Math.round(availableStock / dailyUsage) : null;
+
+      vendorMap[vendor].push({
+        fabricNumber: fn,
+        fabricName: d.fabricName || '—',
+        currentStock: availableStock,
+        dailyUsage: dailyUsage,
+        daysOfStock: daysOfStock,
+        blockedStockDays: blockedDays, // Each fabric's actual blocked days
+        totalMeter: d.totalMeter || 0,
+        shortfallMeters: shortfallMeters,
+        usageInThreshold: usageInThreshold,
+        styleNumbers: d.styleNumbers || [],
+        status: d.status,
+      });
+    });
+
+    Object.keys(vendorMap).forEach((vendor) => {
+      // Sort by most-used fabric (highest total meter used) or by shortfall
+      if (useMostUsedSort) {
+        vendorMap[vendor].sort((a, b) => (b.totalMeter || 0) - (a.totalMeter || 0));
+      } else {
+        vendorMap[vendor].sort((a, b) => b.shortfallMeters - a.shortfallMeters);
+      }
+    });
+
+    return vendorMap;
+  }, [fabricUsageData, daysFilter, vendorFilter, sortBy]);
+
+  /* Get unique vendors */
+  const uniqueVendors = useMemo(() => {
+    if (!fabricUsageData) return [];
+    const vendors = new Set();
+    Object.values(fabricUsageData.fabricUsage).forEach((d) => {
+      if (d.vendor_source) vendors.add(d.vendor_source);
+    });
+    return Array.from(vendors).sort();
+  }, [fabricUsageData]);
+
+  /* ── PDF Exports ──────────────────────────────────────────────── */
+
+  /* 1. Channel Summary PDF */
   const exportChannelSummaryPDF = useCallback(() => {
     if (!groupedData) return;
     try {
@@ -403,6 +527,7 @@ const ProductionReport = () => {
     }
   }, [groupedData]);
 
+  /* 2. Missing Averages PDF */
   const exportMissingAveragesPDF = useCallback(() => {
     if (!groupedData) return;
     try {
@@ -507,19 +632,22 @@ const ProductionReport = () => {
     }
   }, [groupedData]);
 
+  /* 3. Unmapped Relationship PDF */
   const generateUnmappedRelationshipData = useCallback(() => {
     if (!filteredData.length) {
       toast.error('No data.');
       return;
     }
-    const sns = productionStyles.map((r) => r.style_number);
+    const sns = productionStyles.map((r) => String(r.style_number));
     const set = new Set();
     stock.forEach((s) => {
-      if (s.styleNumbers.some((sn) => sns.includes(sn))) set.add(s.fabricNumber);
+      if (s.styleNumbers.some((sn) => sns.includes(String(sn)))) set.add(s.fabricNumber);
     });
     const unmapped = [...set].filter((un) =>
       meterAndKG.some(
-        (m) => m.fabric_number === un && (m.fabric_in_meter === null || m.fabric_in_meter === 0)
+        (m) =>
+          String(m.fabric_number) === String(un) &&
+          (m.fabric_in_meter === null || m.fabric_in_meter === 0)
       )
     );
     if (!unmapped.length) {
@@ -540,7 +668,7 @@ const ProductionReport = () => {
     autoTable(doc, {
       head: [['S.No', 'Fabric Number', 'Status']],
       body: unmapped.map((fn, i) => {
-        const fd = meterAndKG.find((m) => m.fabric_number === fn);
+        const fd = meterAndKG.find((m) => String(m.fabric_number) === String(fn));
         return [(i + 1).toString(), fn, fd?.fabric_in_meter === null ? 'Null' : 'Zero'];
       }),
       startY: 45,
@@ -551,430 +679,381 @@ const ProductionReport = () => {
     doc.save(`unmapped-fabrics-${today.toISOString().split('T')[0]}.pdf`);
   }, [filteredData, productionStyles, stock, meterAndKG]);
 
-  const downloadUsedFabricReport = useCallback(() => {
-    const result = buildFabricUsage();
-    if (!result) {
-      toast.error('No data available.');
-      return;
-    }
-    const { fabricUsage, numberOfDays } = result;
-    const rows = sortByDaysAsc(Object.entries(fabricUsage));
-    const doc = new jsPDF('landscape'),
-      today = new Date(),
-      pw = doc.internal.pageSize.getWidth();
-    doc.setFontSize(18);
-    doc.setTextColor(41, 128, 185);
-    doc.text('USED FABRIC REPORT', pw / 2, 16, { align: 'center' });
-    doc.setFontSize(9);
-    doc.setTextColor(120, 120, 120);
-    doc.text(
-      `Generated: ${today.toLocaleString()}  |  Period: ${Math.round(numberOfDays)} day(s)`,
-      pw / 2,
-      23,
-      { align: 'center' }
-    );
-    autoTable(doc, {
-      startY: 30,
-      head: [
-        [
-          'S.No',
-          'Fabric Number',
-          'Fabric Name',
-          'Total Pieces',
-          'Used (MTR)',
-          'Remaining Stock (MTR)',
-          'Days of Stock',
-        ],
-      ],
-      body: rows.map(([fn, d], i) => [
-        i + 1,
-        fn,
-        d.fabricName,
-        d.totalPieces,
-        d.totalMeter.toFixed(2),
-        d.reStock === 0 ? '0' : Number(d.reStock).toFixed(2),
-        d.daysOfStock !== null ? d.daysOfStock : '∞',
-      ]),
-      styles: { fontSize: 9, halign: 'center' },
-      headStyles: { fillColor: [41, 128, 185], textColor: 255, fontStyle: 'bold' },
-      didParseCell: (h) => {
-        if (h.section === 'body' && h.column.index === 6) {
-          const v = h.cell.raw;
-          if (v !== '∞') {
-            const d = Number(v);
-            if (d < 30) h.cell.styles.fillColor = [255, 220, 220];
-            else if (d < 60) h.cell.styles.fillColor = [255, 243, 205];
-            else h.cell.styles.fillColor = [209, 250, 229];
-          }
-        }
-      },
-    });
-    const pc = doc.internal.getNumberOfPages();
-    for (let i = 1; i <= pc; i++) {
-      doc.setPage(i);
-      doc.setFontSize(8);
-      doc.setTextColor(150, 150, 150);
-      doc.text(`Page ${i} of ${pc}`, pw / 2, doc.internal.pageSize.getHeight() - 8, {
-        align: 'center',
-      });
-    }
-    doc.save(`Used_Fabric_Report_${today.toISOString().split('T')[0]}.pdf`);
-  }, [buildFabricUsage]);
-
-  /* stock table PDF — respects daysFilter */
-  // const exportStockTablePDF = useCallback(() => {
-  //   if (!fabricUsageData) {
-  //     toast.error('No data. Generate report first.');
-  //     return;
-  //   }
-  //   const { numberOfDays } = fabricUsageData;
-  //   const threshold = daysFilter !== '' ? Number(daysFilter) : null;
-  //   if (stockTableRows.length === 0) {
-  //     toast.error('No fabric data matches the current filter.');
-  //     return;
-  //   }
-
-  //   const doc = new jsPDF(),
-  //     today = new Date(),
-  //     pw = doc.internal.pageSize.getWidth();
-  //   const isFiltered = threshold !== null && !isNaN(threshold) && threshold > 0;
-  //   const title = isFiltered
-  //     ? `STOCK SHORTFALL — NEXT ${threshold} DAYS`
-  //     : 'STOCK DAYS REPORT — ALL FABRICS';
-
-  //   doc.setFillColor(15, 23, 42);
-  //   doc.rect(0, 0, pw, isFiltered ? 42 : 36, 'F');
-  //   doc.setFontSize(15);
-  //   doc.setTextColor(255, 255, 255);
-  //   doc.text(title, pw / 2, 14, { align: 'center' });
-  //   doc.setFontSize(9);
-  //   doc.setTextColor(148, 163, 184);
-  //   doc.text(
-  //     `Generated: ${today.toLocaleString()}  |  Based on ${Math.round(numberOfDays)} day(s) of usage`,
-  //     pw / 2,
-  //     22,
-  //     { align: 'center' }
-  //   );
-  //   if (isFiltered) {
-  //     doc.setTextColor(251, 191, 36);
-  //     doc.text(
-  //       `Showing ${stockTableRows.length} fabric(s) with ≤ ${threshold} days remaining stock`,
-  //       pw / 2,
-  //       30,
-  //       { align: 'center' }
-  //     );
-  //   }
-
-  //   // legend
-  //   const ly = isFiltered ? 36 : 29;
-  //   doc.setFontSize(7);
-  //   doc.setFillColor(255, 220, 220);
-  //   doc.rect(14, ly, 8, 4, 'F');
-  //   doc.setTextColor(180, 30, 30);
-  //   doc.text('< 30 days', 24, ly + 3.5);
-  //   doc.setFillColor(255, 243, 205);
-  //   doc.rect(56, ly, 8, 4, 'F');
-  //   doc.setTextColor(146, 64, 14);
-  //   doc.text('30–59 days', 66, ly + 3.5);
-  //   doc.setFillColor(209, 250, 229);
-  //   doc.rect(104, ly, 8, 4, 'F');
-  //   doc.setTextColor(6, 95, 70);
-  //   doc.text('≥ 60 days', 114, ly + 3.5);
-
-  //   autoTable(doc, {
-  //     startY: isFiltered ? 46 : 39,
-  //     head: [
-  //       [
-  //         'S.No',
-  //         'Fabric No.',
-  //         'Fabric Name',
-  //         'Used (MTR)',
-  //         'Stock (MTR)',
-  //         'Daily (MTR/d)',
-  //         'Days Left',
-  //       ],
-  //     ],
-  //     body: stockTableRows.map(([fn, d], i) => [
-  //       i + 1,
-  //       fn,
-  //       d.fabricName || '—',
-  //       d.totalMeter.toFixed(2),
-  //       d.reStock === 0 ? '0.00' : Number(d.reStock).toFixed(2),
-  //       (d.dailyUsage || 0).toFixed(2),
-  //       d.daysOfStock !== null ? d.daysOfStock : '∞',
-  //     ]),
-  //     styles: { fontSize: 9, halign: 'center', cellPadding: 3 },
-  //     headStyles: { fillColor: [15, 23, 42], textColor: 255, fontStyle: 'bold', fontSize: 9 },
-  //     columnStyles: {
-  //       0: { cellWidth: 12 },
-  //       1: { cellWidth: 26 },
-  //       2: { halign: 'left', cellWidth: 52 },
-  //       3: { cellWidth: 22 },
-  //       4: { cellWidth: 22 },
-  //       5: { cellWidth: 22 },
-  //       6: { cellWidth: 20 },
-  //     },
-  //     didParseCell: (h) => {
-  //       if (h.section === 'body' && h.column.index === 6) {
-  //         const v = h.cell.raw;
-  //         if (v !== '∞') {
-  //           const d = Number(v);
-  //           if (d < 30) {
-  //             h.cell.styles.fillColor = [255, 220, 220];
-  //             h.cell.styles.textColor = [153, 27, 27];
-  //           } else if (d < 60) {
-  //             h.cell.styles.fillColor = [255, 243, 205];
-  //             h.cell.styles.textColor = [120, 53, 15];
-  //           } else {
-  //             h.cell.styles.fillColor = [209, 250, 229];
-  //             h.cell.styles.textColor = [6, 78, 59];
-  //           }
-  //         }
-  //       }
-  //     },
-  //     alternateRowStyles: { fillColor: [248, 250, 252] },
-  //   });
-  //   const pc = doc.internal.getNumberOfPages();
-  //   for (let i = 1; i <= pc; i++) {
-  //     doc.setPage(i);
-  //     doc.setFontSize(8);
-  //     doc.setTextColor(150, 150, 150);
-  //     doc.text(`Page ${i} of ${pc}`, pw / 2, doc.internal.pageSize.getHeight() - 8, {
-  //       align: 'center',
-  //     });
-  //   }
-  //   const fname = isFiltered
-  //     ? `Shortfall_Next${threshold}Days_${today.toISOString().split('T')[0]}.pdf`
-  //     : `Stock_Days_Report_${today.toISOString().split('T')[0]}.pdf`;
-  //   doc.save(fname);
-  // }, [fabricUsageData, stockTableRows, daysFilter]);
-  const exportStockTablePDF = useCallback(() => {
-    if (!fabricUsageData) {
-      toast.error('No data. Generate report first.');
+  /* 4. Shortfall Report PDF - Only fabrics with shortfall > 0 */
+  const downloadShortfallReport = useCallback(() => {
+    if (!fabricUsageData || shortfallFabrics.length === 0) {
+      toast.error('No shortfall data available.');
       return;
     }
 
     const { numberOfDays } = fabricUsageData;
+    const threshold = daysFilter !== '' ? Number(daysFilter) : 30;
 
-    const threshold = daysFilter !== '' ? Number(daysFilter) : null;
+    // Get only fabrics with shortfall > 0
+    let entries = shortfallFabrics;
+    if (vendorFilter) {
+      entries = entries.filter(([, d]) => d.vendor_source === vendorFilter);
+    }
 
-    // status === false wale fabrics ko PDF se remove karo
-    console.log('stock table', stockTableRows);
-    const activeStockTableRows = stockTableRows.filter(([fn, d]) => d.status !== false);
-
-    if (activeStockTableRows.length === 0) {
-      toast.error('No active fabric data matches the current filter.');
+    if (entries.length === 0) {
+      toast.error('No fabrics with shortfall match the filter.');
       return;
     }
 
-    const doc = new jsPDF();
-    const today = new Date();
-    const pw = doc.internal.pageSize.getWidth();
+    const doc = new jsPDF('landscape'),
+      today = new Date(),
+      pw = doc.internal.pageSize.getWidth();
 
-    const isFiltered = threshold !== null && !isNaN(threshold) && threshold > 0;
-
-    const title = isFiltered
-      ? `STOCK SHORTFALL — NEXT ${threshold} DAYS`
-      : 'STOCK DAYS REPORT — ALL FABRICS';
-
-    // =========================
-    // HEADER
-    // =========================
-
+    // Header
     doc.setFillColor(15, 23, 42);
-    doc.rect(0, 0, pw, isFiltered ? 42 : 36, 'F');
+    doc.rect(0, 0, pw, 38, 'F');
 
-    doc.setFontSize(15);
+    doc.setFontSize(16);
     doc.setTextColor(255, 255, 255);
-
-    doc.text(title, pw / 2, 14, {
-      align: 'center',
-    });
+    doc.text(`SHORTFALL REPORT — NEXT ${threshold} DAYS`, pw / 2, 14, { align: 'center' });
 
     doc.setFontSize(9);
     doc.setTextColor(148, 163, 184);
-
     doc.text(
-      `Generated: ${today.toLocaleString()}  |  Based on ${Math.round(numberOfDays)} day(s) of usage`,
+      `Generated: ${today.toLocaleString()}  |  Period: ${Math.round(numberOfDays)} day(s)${vendorFilter ? `  |  Vendor: ${vendorFilter}` : ''}  |  Total Fabrics: ${entries.length}`,
       pw / 2,
-      22,
-      {
-        align: 'center',
-      }
+      23,
+      { align: 'center' }
     );
 
-    if (isFiltered) {
-      doc.setTextColor(251, 191, 36);
-
-      doc.text(
-        `Showing ${activeStockTableRows.length} fabric(s) with ≤ ${threshold} days remaining stock`,
-        pw / 2,
-        30,
-        {
-          align: 'center',
-        }
-      );
-    }
-
-    // =========================
-    // LEGEND
-    // =========================
-
-    const ly = isFiltered ? 36 : 29;
-
-    doc.setFontSize(7);
-
-    // < 30 days
-    doc.setFillColor(255, 220, 220);
-    doc.rect(14, ly, 8, 4, 'F');
-
-    doc.setTextColor(180, 30, 30);
-    doc.text('< 30 days', 24, ly + 3.5);
-
-    // 30–59 days
-    doc.setFillColor(255, 243, 205);
-    doc.rect(56, ly, 8, 4, 'F');
-
-    doc.setTextColor(146, 64, 14);
-    doc.text('30–59 days', 66, ly + 3.5);
-
-    // >= 60 days
-    doc.setFillColor(209, 250, 229);
-    doc.rect(104, ly, 8, 4, 'F');
-
-    doc.setTextColor(6, 95, 70);
-    doc.text('≥ 60 days', 114, ly + 3.5);
-
-    // =========================
-    // TABLE
-    // =========================
-
+    // Table with all required columns
     autoTable(doc, {
-      startY: isFiltered ? 46 : 39,
-
+      startY: 44,
       head: [
         [
           'S.No',
           'Fabric No.',
           'Fabric Name',
-          'Used (MTR)',
-          'Stock (MTR)',
-          'Daily (MTR/d)',
+          'Total Used (MTR)',
+          'Daily Used (MTR/d)',
+          'Available Stock (MTR)',
           'Days Left',
+          'Blocked Days',
+          'Shortfall (MTR)',
         ],
       ],
-
-      body: activeStockTableRows.map(([fn, d], i) => [
-        i + 1,
-        fn,
-        d.fabricName || '—',
-        Number(d.totalMeter || 0).toFixed(2),
-        d.reStock === 0 ? '0.00' : Number(d.reStock || 0).toFixed(2),
-        Number(d.dailyUsage || 0).toFixed(2),
-        d.daysOfStock !== null && d.daysOfStock !== undefined ? d.daysOfStock : '∞',
-      ]),
-
-      styles: {
-        fontSize: 9,
-        halign: 'center',
-        cellPadding: 3,
-      },
-
+      body: entries.map(([fn, d], i) => {
+        return [
+          i + 1,
+          fn,
+          d.fabricName || '—',
+          Number(d.totalMeter || 0).toFixed(2),
+          Number(d.dailyUsage || 0).toFixed(2),
+          d.reStock === 0 ? '0.00' : Number(d.reStock || 0).toFixed(2),
+          d.daysOfStock !== null ? d.daysOfStock : '∞',
+          d.blocked_stock_days || 0, // Actual blocked days from stock
+          d.shortfall.toFixed(2),
+        ];
+      }),
+      styles: { fontSize: 9, halign: 'center', cellPadding: 3 },
       headStyles: {
-        fillColor: [15, 23, 42],
+        fillColor: [41, 128, 185],
         textColor: 255,
         fontStyle: 'bold',
         fontSize: 9,
       },
-
       columnStyles: {
-        0: {
-          cellWidth: 12,
-        },
-        1: {
-          cellWidth: 26,
-        },
-        2: {
-          halign: 'left',
-          cellWidth: 52,
-        },
-        3: {
-          cellWidth: 22,
-        },
-        4: {
-          cellWidth: 22,
-        },
-        5: {
-          cellWidth: 22,
-        },
-        6: {
-          cellWidth: 20,
-        },
+        0: { cellWidth: 12 },
+        1: { cellWidth: 22 },
+        2: { halign: 'left', cellWidth: 40 },
+        3: { cellWidth: 25 },
+        4: { cellWidth: 25 },
+        5: { cellWidth: 25 },
+        6: { cellWidth: 20 },
+        7: { cellWidth: 20 },
+        8: { cellWidth: 25, fillColor: [255, 220, 220] },
       },
-
-      // =========================
-      // DAYS LEFT COLOR
-      // =========================
-
       didParseCell: (h) => {
-        if (h.section === 'body' && h.column.index === 6) {
-          const v = h.cell.raw;
-
-          if (v !== '∞') {
-            const d = Number(v);
-
-            if (d < 30) {
-              h.cell.styles.fillColor = [255, 220, 220];
-              h.cell.styles.textColor = [153, 27, 27];
-            } else if (d < 60) {
-              h.cell.styles.fillColor = [255, 243, 205];
-              h.cell.styles.textColor = [120, 53, 15];
-            } else {
-              h.cell.styles.fillColor = [209, 250, 229];
-              h.cell.styles.textColor = [6, 78, 59];
-            }
+        // Highlight shortfall column
+        if (h.section === 'body' && h.column.index === 8) {
+          const v = Number(h.cell.raw);
+          if (v > 0) {
+            h.cell.styles.fillColor = [255, 200, 200];
+            h.cell.styles.textColor = [153, 27, 27];
+            h.cell.styles.fontStyle = 'bold';
           }
         }
       },
-
-      alternateRowStyles: {
-        fillColor: [248, 250, 252],
-      },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
     });
 
-    // =========================
-    // PAGE NUMBERS
-    // =========================
-
     const pc = doc.internal.getNumberOfPages();
-
     for (let i = 1; i <= pc; i++) {
       doc.setPage(i);
-
       doc.setFontSize(8);
       doc.setTextColor(150, 150, 150);
-
       doc.text(`Page ${i} of ${pc}`, pw / 2, doc.internal.pageSize.getHeight() - 8, {
         align: 'center',
       });
     }
 
-    // =========================
-    // FILE NAME
-    // =========================
-
     const dateString = today.toISOString().split('T')[0];
-
-    const fname = isFiltered
-      ? `Shortfall_Next${threshold}Days_${dateString}.pdf`
-      : `Stock_Days_Report_${dateString}.pdf`;
+    const fname = vendorFilter
+      ? `Shortfall_Report_${vendorFilter}_${dateString}.pdf`
+      : `Shortfall_Report_${dateString}.pdf`;
 
     doc.save(fname);
-  }, [fabricUsageData, stockTableRows, daysFilter]);
+    toast.success('Shortfall report exported successfully!');
+  }, [fabricUsageData, shortfallFabrics, vendorFilter, daysFilter]);
+
+  /* 4b. Shortfall Report CSV - same rows/columns as the PDF export */
+  const downloadShortfallCSV = useCallback(() => {
+    if (!fabricUsageData || shortfallFabrics.length === 0) {
+      toast.error('No shortfall data available.');
+      return;
+    }
+
+    let entries = shortfallFabrics;
+    if (vendorFilter) {
+      entries = entries.filter(([, d]) => d.vendor_source === vendorFilter);
+    }
+
+    if (entries.length === 0) {
+      toast.error('No fabrics with shortfall match the filter.');
+      return;
+    }
+
+    const threshold = daysFilter !== '' ? Number(daysFilter) : 30;
+
+    const escapeCsv = (val) => {
+      const s = String(val ?? '');
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+
+    const headers = [
+      'S.No',
+      'Fabric No.',
+      'Fabric Name',
+      'Total Used (MTR)',
+      'Daily Used (MTR/d)',
+      'Available Stock (MTR)',
+      'Days Left',
+      'Blocked Days',
+      'Vendor',
+      'Shortfall (MTR)',
+    ];
+
+    const rows = entries.map(([fn, d], i) => [
+      i + 1,
+      fn,
+      d.fabricName || '—',
+      Number(d.totalMeter || 0).toFixed(2),
+      Number(d.dailyUsage || 0).toFixed(2),
+      d.reStock === 0 ? '0.00' : Number(d.reStock || 0).toFixed(2),
+      d.daysOfStock !== null ? d.daysOfStock : 'Infinity',
+      d.blocked_stock_days || 0,
+      d.vendor_source || 'Unknown',
+      d.shortfall.toFixed(2),
+    ]);
+
+    const csvContent = [headers, ...rows].map((row) => row.map(escapeCsv).join(',')).join('\r\n');
+
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const dateString = new Date().toISOString().split('T')[0];
+    const fname = vendorFilter
+      ? `Shortfall_Report_${vendorFilter}_${dateString}.csv`
+      : `Shortfall_Report_${dateString}.csv`;
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', fname);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    toast.success('Shortfall CSV exported successfully!');
+  }, [fabricUsageData, shortfallFabrics, vendorFilter, daysFilter]);
+
+  /* 5. Vendor Shortfall Report PDF - Only vendors with shortfall > 0 */
+  const exportVendorShortfallPDF = useCallback(() => {
+    if (!fabricUsageData || Object.keys(vendorShortfallRows).length === 0) {
+      toast.error('No shortfall data available.');
+      return;
+    }
+
+    const doc = new jsPDF('landscape');
+    const today = new Date();
+    const pw = doc.internal.pageSize.getWidth();
+    const threshold = daysFilter !== '' ? Number(daysFilter) : 30;
+
+    let sortedVendors = Object.keys(vendorShortfallRows).sort();
+    if (vendorFilter) {
+      sortedVendors = sortedVendors.filter((v) => v === vendorFilter);
+      if (sortedVendors.length === 0) {
+        toast.error(`No shortfall data found for vendor: ${vendorFilter}`);
+        return;
+      }
+    }
+
+    // Header
+    doc.setFillColor(15, 23, 42);
+    doc.rect(0, 0, pw, 38, 'F');
+
+    doc.setFontSize(16);
+    doc.setTextColor(255, 255, 255);
+    doc.text(`VENDOR SHORTFALL REPORT — NEXT ${threshold} DAYS`, pw / 2, 14, { align: 'center' });
+
+    doc.setFontSize(9);
+    doc.setTextColor(148, 163, 184);
+    doc.text(
+      `Generated: ${today.toLocaleString()}  |  Total Vendors: ${sortedVendors.length}${vendorFilter ? `  |  Filtered: ${vendorFilter}` : ''}`,
+      pw / 2,
+      23,
+      { align: 'center' }
+    );
+
+    let startY = 44;
+    let vendorIndex = 1;
+
+    sortedVendors.forEach((vendor) => {
+      const fabrics = vendorShortfallRows[vendor];
+
+      if (fabrics.length === 0) return;
+
+      if (startY > 220) {
+        doc.addPage();
+        startY = 20;
+        doc.setFillColor(15, 23, 42);
+        doc.rect(0, 0, pw, 38, 'F');
+        doc.setFontSize(16);
+        doc.setTextColor(255, 255, 255);
+        doc.text(`VENDOR SHORTFALL REPORT — NEXT ${threshold} DAYS`, pw / 2, 14, {
+          align: 'center',
+        });
+        doc.setFontSize(9);
+        doc.setTextColor(148, 163, 184);
+        doc.text(
+          `Generated: ${today.toLocaleString()}  |  Total Vendors: ${sortedVendors.length}${vendorFilter ? `  |  Filtered: ${vendorFilter}` : ''}`,
+          pw / 2,
+          23,
+          { align: 'center' }
+        );
+        startY = 44;
+      }
+
+      // Vendor header
+      doc.setFontSize(11);
+      doc.setTextColor(41, 128, 185);
+      const totalShortfall = fabrics.reduce((sum, f) => sum + f.shortfallMeters, 0);
+      doc.text(
+        `${vendorIndex}. ${vendor} (${fabrics.length} fabrics | Total Shortfall: ${totalShortfall.toFixed(2)} MTR)`,
+        14,
+        startY
+      );
+
+      startY += 6;
+
+      const tableData = fabrics.map((f, i) => [
+        i + 1,
+        f.fabricNumber,
+        f.fabricName,
+        f.totalMeter.toFixed(2),
+        f.dailyUsage.toFixed(2),
+        f.currentStock.toFixed(2),
+        f.daysOfStock !== null ? f.daysOfStock : '∞',
+        f.blockedStockDays, // Each fabric's actual blocked days from stock
+        f.shortfallMeters.toFixed(2),
+      ]);
+
+      autoTable(doc, {
+        startY: startY,
+        head: [
+          [
+            '#',
+            'Fabric No.',
+            'Fabric Name',
+            'Total Used (MTR)',
+            'Daily Used (MTR/d)',
+            'Available Stock (MTR)',
+            'Days Left',
+            'Blocked Days',
+            'Shortfall (MTR)',
+          ],
+        ],
+        body: tableData,
+        styles: { fontSize: 8, halign: 'center', cellPadding: 2.5 },
+        headStyles: {
+          fillColor: [41, 128, 185],
+          textColor: 255,
+          fontStyle: 'bold',
+          fontSize: 8,
+        },
+        columnStyles: {
+          0: { cellWidth: 10 },
+          1: { cellWidth: 22 },
+          2: { halign: 'left', cellWidth: 35 },
+          3: { cellWidth: 22 },
+          4: { cellWidth: 22 },
+          5: { cellWidth: 22 },
+          6: { cellWidth: 18 },
+          7: { cellWidth: 18 },
+          8: { cellWidth: 22, fillColor: [255, 220, 220] },
+        },
+        didParseCell: (h) => {
+          if (h.section === 'body' && h.column.index === 6) {
+            const v = h.cell.raw;
+            if (v !== '∞') {
+              const d = Number(v);
+              if (d < 10) {
+                h.cell.styles.fillColor = [255, 200, 200];
+                h.cell.styles.textColor = [153, 27, 27];
+              } else if (d < 20) {
+                h.cell.styles.fillColor = [255, 230, 200];
+                h.cell.styles.textColor = [146, 64, 14];
+              } else if (d < 30) {
+                h.cell.styles.fillColor = [255, 243, 205];
+                h.cell.styles.textColor = [120, 53, 15];
+              }
+            }
+          }
+          if (h.section === 'body' && h.column.index === 8) {
+            const v = Number(h.cell.raw);
+            if (v > 0) {
+              h.cell.styles.fillColor = [255, 200, 200];
+              h.cell.styles.textColor = [153, 27, 27];
+              h.cell.styles.fontStyle = 'bold';
+            }
+          }
+        },
+        margin: { left: 10, right: 10 },
+      });
+
+      const finalY = doc.lastAutoTable.finalY || startY + 30;
+      startY = finalY + 8;
+      vendorIndex++;
+    });
+
+    const pc = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= pc; i++) {
+      doc.setPage(i);
+      doc.setFontSize(7);
+      doc.setTextColor(150, 150, 150);
+      doc.text(`Page ${i} of ${pc}`, pw / 2, doc.internal.pageSize.getHeight() - 6, {
+        align: 'center',
+      });
+    }
+
+    const dateString = today.toISOString().split('T')[0];
+    const fname = vendorFilter
+      ? `Vendor_Shortfall_${vendorFilter}_${dateString}.pdf`
+      : `Vendor_Shortfall_Report_${dateString}.pdf`;
+
+    doc.save(fname);
+    toast.success('Vendor shortfall report exported successfully!');
+  }, [fabricUsageData, vendorShortfallRows, daysFilter, vendorFilter]);
+
   const clearFilters = useCallback(() => {
     setChannelFilter('');
     setDateFrom('');
     setDateTo('');
+    setVendorFilter('');
   }, []);
 
   /* ─── Full-page loading spinner ────────────────────────── */
@@ -996,7 +1075,6 @@ const ProductionReport = () => {
         {/* ══ Top gradient header bar ══ */}
         <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 px-6 py-5">
           <div className="max-w-7xl mx-auto flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-            {/* title */}
             <div className="flex items-center gap-3">
               <div className="bg-indigo-500/20 border border-indigo-400/30 text-indigo-300 p-2.5 rounded-xl">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1016,7 +1094,6 @@ const ProductionReport = () => {
               </div>
             </div>
 
-            {/* action buttons */}
             <div className="flex flex-wrap gap-2">
               <Btn
                 onClick={fetchNocoDbRecords}
@@ -1147,7 +1224,8 @@ const ProductionReport = () => {
 
                   <Btn
                     variant="red"
-                    onClick={downloadUsedFabricReport}
+                    onClick={downloadShortfallReport}
+                    disabled={shortfallFabrics.length === 0}
                     icon={
                       <svg
                         className="w-4 h-4"
@@ -1164,7 +1242,53 @@ const ProductionReport = () => {
                       </svg>
                     }
                   >
-                    Used Fabric PDF
+                    Shortfall PDF
+                  </Btn>
+
+                  <Btn
+                    variant="cyan"
+                    onClick={downloadShortfallCSV}
+                    disabled={shortfallFabrics.length === 0}
+                    icon={
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                        />
+                      </svg>
+                    }
+                  >
+                    Shortfall CSV
+                  </Btn>
+
+                  <Btn
+                    variant="orange"
+                    onClick={exportVendorShortfallPDF}
+                    disabled={Object.keys(vendorShortfallRows).length === 0}
+                    icon={
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
+                        />
+                      </svg>
+                    }
+                  >
+                    Vendor Shortfall
                   </Btn>
                 </>
               )}
@@ -1200,9 +1324,9 @@ const ProductionReport = () => {
             </div>
           )}
 
-          {/* ══ TAB NAVIGATION ══ */}
+          {/* ══ TAB NAVIGATION - Only Sync Log and Vendor Shortfall ══ */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
-            <div className="flex border-b border-slate-200 bg-slate-50">
+            <div className="flex border-b border-slate-200 bg-slate-50 overflow-x-auto">
               {[
                 {
                   id: 'sync-log',
@@ -1220,9 +1344,9 @@ const ProductionReport = () => {
                   ),
                 },
                 {
-                  id: 'stock-table',
-                  label: 'Stock Table',
-                  count: fabricUsageData ? stockTableRows.length : null,
+                  id: 'shortfall',
+                  label: 'Shortfall Fabrics',
+                  count: shortfallFabrics.length,
                   icon: (
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
@@ -1234,11 +1358,26 @@ const ProductionReport = () => {
                     </svg>
                   ),
                 },
+                {
+                  id: 'vendor-shortfall',
+                  label: 'Vendor Shortfall',
+                  count: Object.keys(vendorShortfallRows).length,
+                  icon: (
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
+                      />
+                    </svg>
+                  ),
+                },
               ].map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 px-6 py-3.5 text-sm font-semibold transition-all cursor-pointer border-b-2 -mb-px
+                  className={`flex items-center gap-2 px-4 py-3.5 text-sm font-semibold transition-all cursor-pointer border-b-2 -mb-px whitespace-nowrap
                     ${
                       activeTab === tab.id
                         ? 'border-indigo-600 text-indigo-700 bg-white'
@@ -1247,7 +1386,7 @@ const ProductionReport = () => {
                 >
                   {tab.icon}
                   {tab.label}
-                  {tab.count !== null && (
+                  {tab.count !== null && tab.count > 0 && (
                     <span
                       className={`text-xs font-bold px-2 py-0.5 rounded-full ${activeTab === tab.id ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-600'}`}
                     >
@@ -1261,7 +1400,6 @@ const ProductionReport = () => {
             {/* ═══ SYNC LOG TAB ═══ */}
             {activeTab === 'sync-log' && (
               <div>
-                {/* filter bar */}
                 <div className="px-6 pt-5 pb-4 border-b border-slate-100">
                   <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
                     <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
@@ -1269,7 +1407,8 @@ const ProductionReport = () => {
                     </p>
                     <div className="flex gap-2">
                       {[
-                        { label: 'Last 7 days', days: 7 },
+                        // { label: 'Last 7 days', days: 7 },
+                        { label: 'Last 15 days', days: 15 },
                         { label: 'Last 30 days', days: 30 },
                       ].map(({ label, days }) => (
                         <button
@@ -1361,7 +1500,6 @@ const ProductionReport = () => {
                   )}
                 </div>
 
-                {/* table header */}
                 <div className="px-6 py-3 flex items-center justify-between bg-white">
                   <p className="text-xs text-slate-400">
                     Showing <span className="font-bold text-slate-700">{filteredData.length}</span>{' '}
@@ -1375,7 +1513,6 @@ const ProductionReport = () => {
                   )}
                 </div>
 
-                {/* sync log table */}
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-slate-100 text-sm">
                     <thead className="bg-slate-50">
@@ -1446,10 +1583,9 @@ const ProductionReport = () => {
               </div>
             )}
 
-            {/* ═══ STOCK TABLE TAB ═══ */}
-            {activeTab === 'stock-table' && (
+            {/* ═══ SHORTFALL FABRICS TAB ═══ */}
+            {activeTab === 'shortfall' && (
               <div>
-                {/* days filter + export bar */}
                 <div className="px-6 py-5 border-b border-slate-100">
                   {!fabricUsageData ? (
                     <div className="flex items-center gap-3 text-slate-500 text-sm py-2">
@@ -1469,19 +1605,36 @@ const ProductionReport = () => {
                       Click <strong className="text-indigo-600 mx-1">Generate Report</strong> to
                       load fabric usage data
                     </div>
+                  ) : shortfallFabrics.length === 0 ? (
+                    <div className="flex items-center gap-3 text-emerald-600 text-sm py-2">
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                        />
+                      </svg>
+                      No shortfall detected for <strong>{daysFilter || '30'}</strong> days! All
+                      fabrics have sufficient stock.
+                    </div>
                   ) : (
                     <div className="flex flex-col sm:flex-row sm:items-end gap-4">
-                      {/* days input */}
                       <div className="flex-1 space-y-1">
                         <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">
-                          Shortfall Threshold (Days)
+                          Shortfall Days
                         </label>
                         <div className="flex items-center gap-2">
                           <div className="relative flex-1 max-w-xs">
                             <input
                               type="number"
                               min="1"
-                              placeholder="e.g. 10  (leave blank for all)"
+                              placeholder="e.g. 30"
                               value={daysFilter}
                               onChange={(e) => setDaysFilter(e.target.value)}
                               className="w-full pl-4 pr-10 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
@@ -1496,7 +1649,7 @@ const ProductionReport = () => {
                             )}
                           </div>
                           <div className="flex gap-2">
-                            {[7, 10, 15, 30].map((d) => (
+                            {[7, 15, 30, 60].map((d) => (
                               <button
                                 key={d}
                                 onClick={() => setDaysFilter(String(d))}
@@ -1509,33 +1662,47 @@ const ProductionReport = () => {
                           </div>
                         </div>
                         <p className="text-xs text-slate-400 mt-1">
-                          {daysFilter ? (
-                            <>
-                              <span className="text-amber-600 font-semibold">
-                                ⚠ {stockTableRows.length} fabric(s)
-                              </span>{' '}
-                              will run out within <strong>{daysFilter} days</strong>
-                            </>
-                          ) : (
-                            <>
-                              Showing{' '}
-                              <strong className="text-slate-600">
-                                all {stockTableRows.length} fabric(s)
-                              </strong>{' '}
-                              · Based on{' '}
-                              <strong className="text-slate-600">
-                                {Math.round(fabricUsageData.numberOfDays)} day(s)
-                              </strong>{' '}
-                              of usage data
-                            </>
-                          )}
+                          Showing{' '}
+                          <strong className="text-red-600">{shortfallFabrics.length}</strong>{' '}
+                          fabric(s) with shortfall for <strong>{daysFilter || '30'}</strong> days
                         </p>
                       </div>
 
-                      {/* export button */}
+                      <div className="space-y-1 min-w-[120px]">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+                          Sort By
+                        </label>
+                        <select
+                          value={sortBy}
+                          onChange={(e) => setSortBy(e.target.value)}
+                          className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white text-slate-700 transition-all"
+                        >
+                          <option value="shortfall">Highest Shortfall</option>
+                          <option value="used">Highest Used</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1 min-w-[120px]">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+                          Vendor Filter
+                        </label>
+                        <select
+                          value={vendorFilter}
+                          onChange={(e) => setVendorFilter(e.target.value)}
+                          className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white text-slate-700 transition-all"
+                        >
+                          <option value="">All Vendors</option>
+                          {uniqueVendors.map((v) => (
+                            <option key={v} value={v}>
+                              {v}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
                       <Btn
                         variant="cyan"
-                        onClick={exportStockTablePDF}
+                        onClick={downloadShortfallReport}
                         icon={
                           <svg
                             className="w-4 h-4"
@@ -1552,200 +1719,381 @@ const ProductionReport = () => {
                           </svg>
                         }
                       >
-                        {daysFilter
-                          ? `Export Next ${daysFilter}d Shortfall`
-                          : 'Export All Stock PDF'}
+                        Export PDF
+                      </Btn>
+
+                      <Btn
+                        variant="slate"
+                        onClick={downloadShortfallCSV}
+                        icon={
+                          <svg
+                            className="w-4 h-4"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                            />
+                          </svg>
+                        }
+                      >
+                        Export CSV
                       </Btn>
                     </div>
                   )}
                 </div>
 
-                {/* stock table */}
-                {fabricUsageData && (
-                  <>
-                    {/* legend */}
-                    <div className="px-6 py-2.5 bg-slate-50 border-b border-slate-100 flex items-center gap-5 flex-wrap">
-                      <span className="text-xs text-slate-400 font-semibold uppercase tracking-wide">
-                        Legend:
-                      </span>
-                      {[
-                        ['bg-red-100 text-red-700', '< 30 days'],
-                        ['bg-amber-100 text-amber-700', '30–59 days'],
-                        ['bg-emerald-100 text-emerald-700', '≥ 60 days'],
-                        ['bg-slate-100 text-slate-500', '∞ (no usage)'],
-                      ].map(([cls, label]) => (
-                        <span
-                          key={label}
-                          className={`text-xs font-bold px-2 py-0.5 rounded-md ${cls}`}
-                        >
-                          {label}
-                        </span>
-                      ))}
-                    </div>
-
-                    {/* col widths: # 44px | FabricNo 140px | FabricName 220px | rest free */}
-                    <div className="overflow-x-auto">
-                      <table
-                        className="min-w-full text-sm"
-                        style={{ borderCollapse: 'separate', borderSpacing: 0 }}
-                      >
-                        <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
-                          <tr>
+                {fabricUsageData && shortfallFabrics.length > 0 && (
+                  <div className="overflow-x-auto">
+                    <table
+                      className="min-w-full text-sm"
+                      style={{ borderCollapse: 'separate', borderSpacing: 0 }}
+                    >
+                      <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
+                        <tr>
+                          <th
+                            style={{
+                              position: 'sticky',
+                              left: 0,
+                              minWidth: 44,
+                              width: 44,
+                              zIndex: 11,
+                              background: '#f8fafc',
+                              boxShadow: '2px 0 4px -1px rgba(0,0,0,0.08)',
+                            }}
+                            className="px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-200"
+                          >
+                            #
+                          </th>
+                          <th
+                            style={{
+                              position: 'sticky',
+                              left: 44,
+                              minWidth: 100,
+                              width: 100,
+                              zIndex: 11,
+                              background: '#f8fafc',
+                              boxShadow: '2px 0 4px -1px rgba(0,0,0,0.08)',
+                            }}
+                            className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap border-b border-slate-200"
+                          >
+                            Fabric No.
+                          </th>
+                          <th
+                            style={{
+                              position: 'sticky',
+                              left: 144,
+                              minWidth: 140,
+                              width: 140,
+                              zIndex: 11,
+                              background: '#f8fafc',
+                              boxShadow: '2px 0 4px -1px rgba(0,0,0,0.08)',
+                            }}
+                            className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap border-b border-slate-200"
+                          >
+                            Fabric Name
+                          </th>
+                          {[
+                            'Total Used (MTR)',
+                            'Daily Used (MTR/d)',
+                            'Available Stock (MTR)',
+                            'Days Left',
+                            'Blocked Days',
+                            'Vendor',
+                            'Shortfall (MTR)',
+                          ].map((h) => (
                             <th
-                              style={{
-                                position: 'sticky',
-                                left: 0,
-                                minWidth: 44,
-                                width: 44,
-                                zIndex: 11,
-                                background: '#f8fafc',
-                                boxShadow: '2px 0 4px -1px rgba(0,0,0,0.08)',
-                              }}
-                              className="px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-200"
+                              key={h}
+                              className="px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap border-b border-slate-200 bg-slate-50"
                             >
-                              #
+                              {h}
                             </th>
-                            <th
-                              style={{
-                                position: 'sticky',
-                                left: 44,
-                                minWidth: 140,
-                                width: 140,
-                                zIndex: 11,
-                                background: '#f8fafc',
-                                boxShadow: '2px 0 4px -1px rgba(0,0,0,0.08)',
-                              }}
-                              className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap border-b border-slate-200"
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {shortfallFabrics.map(([fn, d], i) => {
+                          const days = d.daysOfStock;
+                          const isActuallyOutOfStock = Number(d.reStock) === 0;
+                          const shortfall = d.shortfall || 0;
+                          const rowBg = '#fef2f2'; // Always red for shortfall fabrics
+                          return (
+                            <tr
+                              key={fn}
+                              className="transition-colors hover:brightness-95"
+                              style={{ borderBottom: '1px solid #f1f5f9' }}
                             >
-                              Fabric No.
-                            </th>
-                            <th
-                              style={{
-                                position: 'sticky',
-                                left: 184,
-                                minWidth: 220,
-                                width: 220,
-                                zIndex: 11,
-                                background: '#f8fafc',
-                                boxShadow: '2px 0 4px -1px rgba(0,0,0,0.08)',
-                              }}
-                              className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap border-b border-slate-200"
-                            >
-                              Fabric Name
-                            </th>
-                            {['Used (MTR)', 'Stock (MTR)', 'Daily (MTR/d)', 'Days Left'].map(
-                              (h) => (
-                                <th
-                                  key={h}
-                                  className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap border-b border-slate-200 bg-slate-50"
-                                >
-                                  {h}
-                                </th>
-                              )
-                            )}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {stockTableRows.length > 0 ? (
-                            stockTableRows.map(([fn, d], i) => {
-                              const days = d.daysOfStock;
-                              const isActuallyOutOfStock = Number(d.reStock) === 0;
-                              const rowBg = isActuallyOutOfStock
-                                ? '#fef2f2'
-                                : days !== null && days < 30
-                                  ? 'rgba(254,242,242,0.6)'
-                                  : days !== null && days < 60
-                                    ? 'rgba(255,251,235,0.6)'
-                                    : '#ffffff';
-                              return (
-                                <tr
-                                  key={fn}
-                                  className="transition-colors hover:brightness-95"
-                                  style={{ borderBottom: '1px solid #f1f5f9' }}
-                                >
-                                  <td
-                                    style={{
-                                      position: 'sticky',
-                                      left: 0,
-                                      width: 44,
-                                      minWidth: 44,
-                                      zIndex: 5,
-                                      background: rowBg,
-                                      boxShadow: '2px 0 4px -1px rgba(0,0,0,0.06)',
-                                    }}
-                                    className="px-3 py-3.5 text-xs text-slate-400 font-medium"
-                                  >
-                                    {i + 1}
-                                  </td>
-                                  <td
-                                    style={{
-                                      position: 'sticky',
-                                      left: 44,
-                                      width: 140,
-                                      minWidth: 140,
-                                      zIndex: 5,
-                                      background: rowBg,
-                                      boxShadow: '2px 0 4px -1px rgba(0,0,0,0.06)',
-                                    }}
-                                    className="px-4 py-3.5 font-mono text-xs font-bold text-indigo-700"
-                                  >
-                                    {fn}
-                                  </td>
-                                  <td
-                                    style={{
-                                      position: 'sticky',
-                                      left: 184,
-                                      width: 220,
-                                      minWidth: 220,
-                                      zIndex: 5,
-                                      background: rowBg,
-                                      boxShadow: '2px 0 4px -1px rgba(0,0,0,0.06)',
-                                    }}
-                                    className="px-4 py-3.5 text-sm text-slate-800 font-medium"
-                                  >
-                                    {d.fabricName || '—'}
-                                  </td>
-                                  <td className="px-4 py-3.5 text-sm font-semibold text-indigo-600 whitespace-nowrap">
-                                    {d.totalMeter.toFixed(2)}
-                                  </td>
-                                  <td className="px-4 py-3.5 text-sm font-semibold whitespace-nowrap">
-                                    {isActuallyOutOfStock ? (
-                                      <span className="text-red-500 font-bold">0.00</span>
-                                    ) : (
-                                      Number(d.reStock).toFixed(2)
-                                    )}
-                                  </td>
-                                  <td className="px-4 py-3.5 text-xs text-slate-500 whitespace-nowrap">
-                                    {(d.dailyUsage || 0).toFixed(2)}
-                                  </td>
-                                  <td className="px-4 py-3.5 whitespace-nowrap">
-                                    <DaysBadge days={days} stock={d.reStock} />
-                                  </td>
-                                </tr>
-                              );
-                            })
-                          ) : (
-                            <tr>
-                              <td colSpan={7} className="py-16 text-center">
-                                <EmptyState
-                                  message={
-                                    !productionStyles.length
-                                      ? 'No production data loaded'
-                                      : 'No fabrics match the filter'
-                                  }
-                                  sub={
-                                    !productionStyles.length
-                                      ? 'Click Generate Report first'
-                                      : `No fabric runs out within ${daysFilter} days`
-                                  }
-                                />
+                              <td
+                                style={{
+                                  position: 'sticky',
+                                  left: 0,
+                                  width: 44,
+                                  minWidth: 44,
+                                  zIndex: 5,
+                                  background: rowBg,
+                                  boxShadow: '2px 0 4px -1px rgba(0,0,0,0.06)',
+                                }}
+                                className="px-3 py-3.5 text-xs text-slate-400 font-medium"
+                              >
+                                {i + 1}
+                              </td>
+                              <td
+                                style={{
+                                  position: 'sticky',
+                                  left: 44,
+                                  width: 100,
+                                  minWidth: 100,
+                                  zIndex: 5,
+                                  background: rowBg,
+                                  boxShadow: '2px 0 4px -1px rgba(0,0,0,0.06)',
+                                }}
+                                className="px-4 py-3.5 font-mono text-xs font-bold text-indigo-700"
+                              >
+                                {fn}
+                              </td>
+                              <td
+                                style={{
+                                  position: 'sticky',
+                                  left: 144,
+                                  width: 140,
+                                  minWidth: 140,
+                                  zIndex: 5,
+                                  background: rowBg,
+                                  boxShadow: '2px 0 4px -1px rgba(0,0,0,0.06)',
+                                }}
+                                className="px-4 py-3.5 text-sm text-slate-800 font-medium"
+                              >
+                                {d.fabricName || '—'}
+                              </td>
+                              <td className="px-3 py-3.5 text-sm font-semibold text-indigo-600 whitespace-nowrap">
+                                {d.totalMeter.toFixed(2)}
+                              </td>
+                              <td className="px-3 py-3.5 text-xs text-slate-500 whitespace-nowrap">
+                                {(d.dailyUsage || 0).toFixed(2)}
+                              </td>
+                              <td className="px-3 py-3.5 text-sm font-semibold whitespace-nowrap">
+                                {isActuallyOutOfStock ? (
+                                  <span className="text-red-500 font-bold">0.00</span>
+                                ) : (
+                                  Number(d.reStock).toFixed(2)
+                                )}
+                              </td>
+                              <td className="px-3 py-3.5 whitespace-nowrap">
+                                {days !== null ? `${days}d` : '∞'}
+                              </td>
+                              <td className="px-3 py-3.5 text-xs text-slate-600 whitespace-nowrap">
+                                {d.blocked_stock_days || 0}
+                              </td>
+                              <td className="px-3 py-3.5 text-xs text-slate-600 whitespace-nowrap">
+                                {d.vendor_source || 'Unknown'}
+                              </td>
+                              <td className="px-3 py-3.5 text-sm font-bold whitespace-nowrap">
+                                <span className="text-red-600">{shortfall.toFixed(2)}</span>
                               </td>
                             </tr>
-                          )}
-                        </tbody>
-                      </table>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ═══ VENDOR SHORTFALL TAB ═══ */}
+            {activeTab === 'vendor-shortfall' && (
+              <div>
+                <div className="px-6 py-5 border-b border-slate-100">
+                  {!fabricUsageData ? (
+                    <div className="flex items-center gap-3 text-slate-500 text-sm py-2">
+                      <svg
+                        className="w-5 h-5 text-slate-400"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                        />
+                      </svg>
+                      Click <strong className="text-indigo-600 mx-1">Generate Report</strong> to
+                      load vendor shortfall data
                     </div>
-                  </>
+                  ) : Object.keys(vendorShortfallRows).length === 0 ? (
+                    <div className="flex items-center gap-3 text-emerald-600 text-sm py-2">
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                        />
+                      </svg>
+                      No shortfall detected for <strong>{daysFilter || '30'}</strong> days!
+                    </div>
+                  ) : (
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div>
+                        <p className="text-sm text-slate-600">
+                          <span className="font-bold text-indigo-600">
+                            {Object.keys(vendorShortfallRows).length}
+                          </span>{' '}
+                          vendors with shortfall for <strong>{daysFilter || '30'}</strong> days
+                          {vendorFilter && (
+                            <span className="ml-2 text-indigo-600">· Filtered: {vendorFilter}</span>
+                          )}
+                        </p>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          Based on {Math.round(fabricUsageData?.numberOfDays || 0)} days of usage
+                          data
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <select
+                          value={vendorFilter}
+                          onChange={(e) => setVendorFilter(e.target.value)}
+                          className="px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white text-slate-700 transition-all"
+                        >
+                          <option value="">All Vendors</option>
+                          {uniqueVendors.map((v) => (
+                            <option key={v} value={v}>
+                              {v}
+                            </option>
+                          ))}
+                        </select>
+                        <Btn
+                          variant="red"
+                          onClick={exportVendorShortfallPDF}
+                          icon={
+                            <svg
+                              className="w-4 h-4"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                              />
+                            </svg>
+                          }
+                        >
+                          Export {vendorFilter ? vendorFilter : 'All'} Shortfall
+                        </Btn>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {fabricUsageData && Object.keys(vendorShortfallRows).length > 0 && (
+                  <div className="p-4 space-y-6">
+                    {Object.keys(vendorShortfallRows)
+                      .sort()
+                      .map((vendor) => {
+                        const fabrics = vendorShortfallRows[vendor];
+                        const totalShortfall = fabrics.reduce(
+                          (sum, f) => sum + f.shortfallMeters,
+                          0
+                        );
+
+                        return (
+                          <div
+                            key={vendor}
+                            className="border border-slate-200 rounded-xl overflow-hidden"
+                          >
+                            <div className="bg-gradient-to-r from-slate-50 to-slate-100 px-4 py-3 border-b border-slate-200 flex justify-between items-center">
+                              <div className="flex items-center gap-3">
+                                <span className="bg-indigo-100 text-indigo-700 text-xs font-bold px-2.5 py-1 rounded-full">
+                                  {fabrics.length} fabrics
+                                </span>
+                                <span className="text-sm font-bold text-slate-700">{vendor}</span>
+                              </div>
+                              <div className="flex items-center gap-4">
+                                <span className="text-xs text-slate-500">
+                                  Total Shortfall:{' '}
+                                  <span className="font-bold text-red-600">
+                                    {totalShortfall.toFixed(2)} MTR
+                                  </span>
+                                </span>
+                              </div>
+                            </div>
+                            <div className="overflow-x-auto">
+                              <table className="min-w-full text-sm">
+                                <thead className="bg-slate-50">
+                                  <tr>
+                                    {[
+                                      '#',
+                                      'Fabric No.',
+                                      'Fabric Name',
+                                      'Total Used (MTR)',
+                                      'Daily Used (MTR/d)',
+                                      'Available Stock (MTR)',
+                                      'Days Left',
+                                      'Blocked Days',
+                                      'Shortfall (MTR)',
+                                    ].map((h) => (
+                                      <th
+                                        key={h}
+                                        className="px-3 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap"
+                                      >
+                                        {h}
+                                      </th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {fabrics.map((f, i) => (
+                                    <tr key={f.fabricNumber} className="bg-red-50/50">
+                                      <td className="px-3 py-2.5 text-xs text-slate-400">
+                                        {i + 1}
+                                      </td>
+                                      <td className="px-3 py-2.5 font-mono text-xs font-bold text-indigo-700">
+                                        {f.fabricNumber}
+                                      </td>
+                                      <td className="px-3 py-2.5 text-sm text-slate-800">
+                                        {f.fabricName}
+                                      </td>
+                                      <td className="px-3 py-2.5 text-sm text-indigo-600">
+                                        {f.totalMeter.toFixed(2)}
+                                      </td>
+                                      <td className="px-3 py-2.5 text-xs text-slate-500">
+                                        {f.dailyUsage.toFixed(2)}
+                                      </td>
+                                      <td className="px-3 py-2.5 text-sm font-semibold">
+                                        {f.currentStock.toFixed(2)}
+                                      </td>
+                                      <td className="px-3 py-2.5">
+                                        {f.daysOfStock !== null ? `${f.daysOfStock}d` : '∞'}
+                                      </td>
+                                      <td className="px-3 py-2.5 text-xs text-slate-600">
+                                        {f.blockedStockDays}
+                                      </td>
+                                      <td className="px-3 py-2.5 text-sm font-bold text-red-600">
+                                        {f.shortfallMeters.toFixed(2)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
                 )}
               </div>
             )}

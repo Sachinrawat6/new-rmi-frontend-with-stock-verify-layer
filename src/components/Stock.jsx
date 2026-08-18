@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useGlobalContext } from './context/StockContextProvider';
 import axios from 'axios';
 import { BASE_URL } from '../constant/index.js';
@@ -21,6 +21,10 @@ const Stock = () => {
   });
   const [showFilters, setShowFilters] = useState(false);
 
+  // CSV export - how many top fabrics (by available stock) to include
+  const [exportCount, setExportCount] = useState('50');
+  const [customExportCount, setCustomExportCount] = useState('');
+
   const itemsPerPage = 50;
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
@@ -41,6 +45,16 @@ const Stock = () => {
       p.vendor_source?.toLowerCase().includes(term) ||
       p.blocked_stock_days === Number(term);
 
+    // Vendor filter
+    const matchesVendor =
+      !filters.vendor_source ||
+      p.vendor_source?.toLowerCase() === filters.vendor_source.toLowerCase();
+
+    // Blocked days filter
+    const matchesBlockedDays =
+      filters.blocked_stock_days === '' ||
+      Number(p.blocked_stock_days || 0) === Number(filters.blocked_stock_days);
+
     // Min stock filter
     const matchesMinStock =
       !filters.minStock || (p.availableStock || 0) >= parseFloat(filters.minStock);
@@ -53,7 +67,14 @@ const Stock = () => {
     const matchesLocation =
       !filters.location || p.location?.toLowerCase() === filters.location.toLowerCase();
 
-    return matchesSearch && matchesMinStock && matchesMaxStock && matchesLocation;
+    return (
+      matchesSearch &&
+      matchesVendor &&
+      matchesBlockedDays &&
+      matchesMinStock &&
+      matchesMaxStock &&
+      matchesLocation
+    );
   });
 
   const displayItems = filteredData.slice(startIndex, endIndex);
@@ -105,6 +126,65 @@ const Stock = () => {
       setUpdating(false);
     }
   };
+
+  /* CSV export - takes the current filtered/searched data, sorts by
+     available stock (highest first) and exports the top N fabrics.
+     N is user-selectable (10 / 15 / 50 / 100), defaulting to 50. */
+  const exportStockCSV = useCallback(() => {
+    if (!filteredData.length) return;
+
+    const count =
+      exportCount === 'custom'
+        ? Math.max(1, parseInt(customExportCount, 10) || filteredData.length)
+        : Number(exportCount) || 50;
+
+    const topFabrics = [...filteredData]
+      .sort((a, b) => (b.availableStock || 0) - (a.availableStock || 0))
+      .slice(0, count);
+
+    const escapeCsv = (val) => {
+      const s = String(val ?? '');
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+
+    const headers = [
+      '#',
+      'Fabric No.',
+      'Fabric Name',
+      'Available Stock (MTR)',
+      'Location',
+      'Style Numbers',
+      'Vendor',
+      'Blocked Days',
+      'Status',
+    ];
+
+    const rows = topFabrics.map((item, i) => [
+      i + 1,
+      item.fabricNumber ?? '—',
+      item.fabricName ?? '—',
+      Number(item.availableStock || 0).toFixed(2),
+      item.location || '-',
+      item.styleNumbers && item.styleNumbers.length > 0 ? item.styleNumbers.join(' | ') : '-',
+      item.vendor_source || '-',
+      item.blocked_stock_days || 0,
+      item.status ? 'Active' : 'Inactive',
+    ]);
+
+    const csvContent = [headers, ...rows].map((row) => row.map(escapeCsv).join(',')).join('\r\n');
+
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const dateString = new Date().toISOString().split('T')[0];
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Fabric_Stock_Top${count}_${dateString}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [filteredData, exportCount, customExportCount]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -200,6 +280,50 @@ const Stock = () => {
                   Clear All
                 </button>
               )}
+
+              {/* Export controls */}
+              <div className="flex items-center gap-2 pl-1 border-l border-gray-200 ml-1">
+                <label className="text-xs font-medium text-gray-500 whitespace-nowrap">
+                  Export Top
+                </label>
+                <select
+                  value={exportCount}
+                  onChange={(e) => setExportCount(e.target.value)}
+                  className="px-2.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-gray-700 transition-colors duration-200"
+                >
+                  {[10, 15, 50, 100].map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                  <option value="custom">Custom</option>
+                </select>
+                {exportCount === 'custom' && (
+                  <input
+                    type="number"
+                    min="1"
+                    value={customExportCount}
+                    onChange={(e) => setCustomExportCount(e.target.value)}
+                    placeholder="e.g. 25"
+                    className="w-24 px-2.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors duration-200"
+                  />
+                )}
+                <button
+                  onClick={exportStockCSV}
+                  disabled={filteredData.length === 0}
+                  className="px-4 py-2 text-sm font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-200 flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                    />
+                  </svg>
+                  Export CSV
+                </button>
+              </div>
             </div>
           </div>
 
