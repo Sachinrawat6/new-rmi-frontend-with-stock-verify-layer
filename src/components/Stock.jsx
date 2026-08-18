@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useGlobalContext } from './context/StockContextProvider';
 import axios from 'axios';
 import { BASE_URL } from '../constant/index.js';
+import { ProductStyleImages } from 'react-product-style-images';
 
 const Stock = () => {
   const { stock, stockLoading } = useGlobalContext();
@@ -455,6 +456,7 @@ const Stock = () => {
               <tr>
                 {[
                   '#',
+                  // 'Image',
                   'Fabric No.',
                   'Fabric Name',
                   'Available Stock',
@@ -480,6 +482,15 @@ const Stock = () => {
                     <td className="px-4 sm:px-6 py-4 font-medium text-gray-900 text-sm">
                       {startIndex + i + 1}
                     </td>
+                    {/* <td className="px-4 sm:px-6 py-4 w-80">
+                      <ProductStyleImages
+                        styleNumbers={curStock.styleNumbers[0]}
+                        imageCount={1}
+                        width="5%"
+                        height="5%"
+                      />
+                    </td> */}
+
                     <td className="px-4 sm:px-6 py-4">
                       <span className="text-blue-600 font-medium">{curStock.fabricNumber}</span>
                     </td>
@@ -537,20 +548,63 @@ const Stock = () => {
 
                   {/* Expanded row for style numbers */}
                   {expandedItems[curStock.fabricNumber] && curStock.styleNumbers?.length > 0 && (
-                    <tr className="bg-blue-50/50">
-                      <td colSpan="9" className="px-4 sm:px-6 py-4">
-                        <div className="mb-2 font-medium text-blue-800 text-sm">
-                          Linked Style Numbers:
+                    <tr className="relative bg-blue-50/50">
+                      <td colSpan={9} className="px-4 sm:px-6 py-4">
+                        {/* Close/Collapse Button */}
+                        <button
+                          onClick={() => {
+                            // Your collapse logic here
+                            // Example: setExpandedItems(prev => ({ ...prev, [curStock.fabricNumber]: false }))
+                          }}
+                          className="absolute top-2 right-4 text-gray-400 hover:text-gray-600 transition-colors duration-200"
+                          aria-label="Collapse"
+                        >
+                          <svg
+                            className="w-5 h-5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M6 18L18 6M6 6l12 12"
+                            />
+                          </svg>
+                        </button>
+
+                        {/* Linked Style Numbers - Top */}
+                        <div className="mb-3">
+                          <div className="text-sm font-medium text-blue-800 mb-2">
+                            Linked Style Numbers:
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {curStock.styleNumbers.map((styleNumber, idx) => (
+                              <span
+                                key={idx}
+                                className="px-3 py-1 text-xs font-medium text-blue-700 bg-white border border-blue-200 rounded-full shadow-sm"
+                              >
+                                {styleNumber}
+                              </span>
+                            ))}
+                          </div>
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                          {curStock.styleNumbers.map((styleNumber, idx) => (
-                            <span
-                              key={idx}
-                              className="px-3 py-1 bg-white border border-blue-200 rounded-full text-blue-700 text-xs font-medium"
-                            >
-                              {styleNumber}
-                            </span>
-                          ))}
+
+                        {/* Product Image - Centered with Blur Background */}
+                        <div className="relative flex items-center justify-center py-6">
+                          {/* Blur Background */}
+                          <div className="absolute inset-0 bg-blue-100/30 backdrop-blur-sm rounded-lg -mx-2" />
+
+                          {/* Image Container */}
+                          <div className="relative z-10">
+                            <ProductStyleImages
+                              styleNumbers={curStock.styleNumbers[0]}
+                              imageCount={1}
+                              width="40%"
+                              height="40%"
+                            />
+                          </div>
                         </div>
                       </td>
                     </tr>
