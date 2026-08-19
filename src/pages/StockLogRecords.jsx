@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { BASE_URL } from '../constant/index.js';
 import axios from 'axios';
 import { useNavigate, useParams } from 'react-router-dom';
+import OtpModal from '../components/OtpModel.jsx';
 
 /* ---------------------------------------------------------
    Custom Modal (replaces window.alert / window.confirm)
@@ -148,6 +149,8 @@ const StockLogRecords = () => {
   const [editingId, setEditingId] = useState(null);
   const [selectedRecords, setSelectedRecords] = useState([]);
   const [selectAll, setSelectAll] = useState(false);
+  const [showOtpModal, setShowOtpModal] = useState(false);
+  const [selectedLogId, setSelectedLogId] = useState(null);
   const [editData, setEditData] = useState({
     added_stock: '',
     location: '',
@@ -155,6 +158,13 @@ const StockLogRecords = () => {
     width: '',
   });
   const { session_id } = useParams();
+
+  // State for bulk approve with OTP
+  const [bulkApproveData, setBulkApproveData] = useState({
+    ids: [],
+    nonApprovable: [],
+    totalSelected: 0,
+  });
 
   // Modal state: one for confirmations, one for result/info messages
   const [confirmModal, setConfirmModal] = useState({ open: false });
@@ -241,7 +251,7 @@ const StockLogRecords = () => {
     setSelectAll(!selectAll);
   };
 
-  // Bulk Approve
+  // Bulk Approve - OTP based
   const handleBulkApprove = () => {
     if (selectedRecords.length === 0) {
       showInfo({ title: 'No records selected', message: 'Please select at least one record.' });
@@ -265,84 +275,81 @@ const StockLogRecords = () => {
       return;
     }
 
-    const confirmMessage =
-      nonApprovableRecords.length > 0
-        ? `${nonApprovableRecords.length} record(s) will be skipped because stock is already added.`
-        : 'This will mark the selected records as approved.';
-
-    askConfirm({
-      title: `Approve ${approvableRecords.length} record(s)?`,
-      message: confirmMessage,
-      tone: 'success',
-      confirmLabel: 'Approve',
-      onConfirm: async () => {
-        try {
-          console.log('Bulk approving records:', approvableRecords);
-          const response = await axios.put(`${BASE_URL}/verify-stocks/bulk-approve`, {
-            ids: approvableRecords,
-          });
-
-          console.log('response', response.data);
-
-          const { totalRequested, approvedCount, skippedCount, failedCount } = response.data.data;
-
-          const stats = [
-            { label: 'Total requested', value: totalRequested ?? selectedRecords.length },
-            { label: 'Approved', value: approvedCount ?? 0, tone: 'success' },
-          ];
-          if (skippedCount)
-            stats.push({
-              label: 'Skipped (stock already added)',
-              value: skippedCount,
-              tone: 'warning',
-            });
-          if (failedCount) stats.push({ label: 'Failed', value: failedCount, tone: 'danger' });
-
-          showInfo({
-            title: 'Bulk approve complete',
-            stats,
-            tone: failedCount ? 'danger' : 'success',
-          });
-
-          setSelectedRecords([]);
-          setSelectAll(false);
-          fetchStockLogRecords(page);
-        } catch (error) {
-          console.error(error);
-          showInfo({
-            title: 'Failed to approve records',
-            message: error.response?.data?.message || 'Something went wrong. Please try again.',
-            tone: 'danger',
-          });
-        }
-      },
+    // Store bulk approve data and show OTP modal
+    setBulkApproveData({
+      ids: approvableRecords,
+      nonApprovable: nonApprovableRecords,
+      totalSelected: selectedRecords.length,
     });
+    setShowOtpModal(true);
   };
 
-  // Bulk Reject
+  // Bulk Reject - OTP based
   const handleBulkReject = () => {
     if (selectedRecords.length === 0) {
       showInfo({ title: 'No records selected', message: 'Please select at least one record.' });
       return;
     }
 
-    askConfirm({
-      title: `Reject ${selectedRecords.length} record(s)?`,
-      message: 'Stock added by these records (if any) will be reversed.',
-      tone: 'danger',
-      confirmLabel: 'Reject',
-      onConfirm: async () => {
-        try {
-          console.log('Bulk rejecting records:', selectedRecords);
+    // Store bulk reject data and show OTP modal
+    setBulkApproveData({
+      ids: selectedRecords,
+      nonApprovable: [],
+      totalSelected: selectedRecords.length,
+      isReject: true,
+    });
+    setShowOtpModal(true);
+  };
+
+  // Single approve - OTP based
+  const handleApprove = (logId) => {
+    const record = stockLogRecords.find((log) => log._id === logId);
+
+    if (record && record.is_stock_added === true) {
+      showInfo({
+        title: 'Cannot approve',
+        message: 'Stock is already added for this record.',
+        tone: 'danger',
+      });
+      return;
+    }
+
+    setSelectedLogId(logId);
+    setBulkApproveData({ ids: [], nonApprovable: [], totalSelected: 0 });
+    setShowOtpModal(true);
+  };
+
+  // Single reject - OTP based
+  const handleReject = (logId) => {
+    setSelectedLogId(logId);
+    setBulkApproveData({
+      ids: [logId],
+      nonApprovable: [],
+      totalSelected: 1,
+      isReject: true,
+    });
+    setShowOtpModal(true);
+  };
+
+  // OTP Verified Handler - Handles both single and bulk operations
+  const handleOtpVerified = async () => {
+    // Check if it's a bulk operation
+    if (bulkApproveData.ids && bulkApproveData.ids.length > 0) {
+      const isReject = bulkApproveData.isReject || false;
+
+      try {
+        if (isReject) {
+          // Bulk Reject
+          console.log('Bulk rejecting records after OTP:', bulkApproveData.ids);
           const response = await axios.put(`${BASE_URL}/verify-stocks/bulk-reject`, {
-            ids: selectedRecords,
+            ids: bulkApproveData.ids,
           });
 
           const { totalRequested, rejectedCount, failedCount, alreadyRejectedCount } =
             response.data.data;
 
           const stats = [
-            { label: 'Total requested', value: totalRequested ?? selectedRecords.length },
+            { label: 'Total requested', value: totalRequested ?? bulkApproveData.totalSelected },
             { label: 'Rejected', value: rejectedCount ?? 0, tone: 'success' },
           ];
           if (alreadyRejectedCount)
@@ -358,79 +365,89 @@ const StockLogRecords = () => {
             stats,
             tone: failedCount ? 'danger' : 'success',
           });
+        } else {
+          // Bulk Approve
+          console.log('Bulk approving records after OTP:', bulkApproveData.ids);
+          const response = await axios.put(`${BASE_URL}/verify-stocks/bulk-approve`, {
+            ids: bulkApproveData.ids,
+          });
 
-          setSelectedRecords([]);
-          setSelectAll(false);
-          fetchStockLogRecords(page);
-        } catch (error) {
-          console.error(error);
+          const { totalRequested, approvedCount, skippedCount, failedCount } = response.data.data;
+
+          const stats = [
+            { label: 'Total requested', value: totalRequested ?? bulkApproveData.totalSelected },
+            { label: 'Approved', value: approvedCount ?? 0, tone: 'success' },
+          ];
+          if (skippedCount)
+            stats.push({
+              label: 'Skipped (stock already added)',
+              value: skippedCount,
+              tone: 'warning',
+            });
+          if (bulkApproveData.nonApprovable && bulkApproveData.nonApprovable.length > 0)
+            stats.push({
+              label: 'Skipped (already added)',
+              value: bulkApproveData.nonApprovable.length,
+              tone: 'warning',
+            });
+          if (failedCount) stats.push({ label: 'Failed', value: failedCount, tone: 'danger' });
+
           showInfo({
-            title: 'Failed to reject records',
-            message: error.response?.data?.message || 'Something went wrong. Please try again.',
-            tone: 'danger',
+            title: 'Bulk approve complete',
+            stats,
+            tone: failedCount ? 'danger' : 'success',
           });
         }
-      },
-    });
-  };
 
-  // Single approve
-  const handleApprove = (logId) => {
-    const record = stockLogRecords.find((log) => log._id === logId);
-    if (record && record.is_stock_added === true) {
-      showInfo({
-        title: 'Cannot approve',
-        message: 'Stock is already added for this record.',
-        tone: 'danger',
-      });
-      return;
-    }
+        setSelectedRecords([]);
+        setSelectAll(false);
+        setBulkApproveData({ ids: [], nonApprovable: [], totalSelected: 0 });
+        fetchStockLogRecords(page);
+      } catch (error) {
+        console.error(error);
+        showInfo({
+          title: isReject ? 'Failed to reject records' : 'Failed to approve records',
+          message: error.response?.data?.message || 'Something went wrong. Please try again.',
+          tone: 'danger',
+        });
+      } finally {
+        setShowOtpModal(false);
+        setSelectedLogId(null);
+        setBulkApproveData({ ids: [], nonApprovable: [], totalSelected: 0 });
+      }
+    } else if (selectedLogId) {
+      // Single operation
+      const isReject = bulkApproveData.isReject || false;
 
-    askConfirm({
-      title: 'Approve this record?',
-      tone: 'success',
-      confirmLabel: 'Approve',
-      onConfirm: async () => {
-        try {
-          console.log('Approving record:', logId);
-          await axios.put(`${BASE_URL}/verify-stocks/${logId}/approve`);
-          showInfo({ title: 'Record approved', tone: 'success' });
-          fetchStockLogRecords(page);
-        } catch (error) {
-          console.error(error);
-          showInfo({
-            title: 'Failed to approve record',
-            message: error.response?.data?.message || 'Something went wrong. Please try again.',
-            tone: 'danger',
-          });
-        }
-      },
-    });
-  };
-
-  // Single reject
-  const handleReject = (logId) => {
-    askConfirm({
-      title: 'Reject this record?',
-      message: 'Stock added by this record (if any) will be reversed.',
-      tone: 'danger',
-      confirmLabel: 'Reject',
-      onConfirm: async () => {
-        try {
-          console.log('Rejecting record:', logId);
-          await axios.put(`${BASE_URL}/verify-stocks/${logId}/reject`);
+      try {
+        if (isReject) {
+          // Single Reject
+          console.log('Rejecting record after OTP:', selectedLogId);
+          await axios.put(`${BASE_URL}/verify-stocks/${selectedLogId}/reject`);
           showInfo({ title: 'Record rejected', tone: 'success' });
-          fetchStockLogRecords(page);
-        } catch (error) {
-          console.error(error);
-          showInfo({
-            title: 'Failed to reject record',
-            message: error.response?.data?.message || 'Something went wrong. Please try again.',
-            tone: 'danger',
-          });
+        } else {
+          // Single Approve
+          console.log('Approving record after OTP:', selectedLogId);
+          await axios.put(`${BASE_URL}/verify-stocks/${selectedLogId}/approve`);
+          showInfo({ title: 'Record approved', tone: 'success' });
         }
-      },
-    });
+
+        setShowOtpModal(false);
+        setSelectedLogId(null);
+        setBulkApproveData({ ids: [], nonApprovable: [], totalSelected: 0 });
+        fetchStockLogRecords(page);
+      } catch (error) {
+        console.error(error);
+        showInfo({
+          title: isReject ? 'Failed to reject record' : 'Failed to approve record',
+          message: error.response?.data?.message || 'Something went wrong. Please try again.',
+          tone: 'danger',
+        });
+        setShowOtpModal(false);
+        setSelectedLogId(null);
+        setBulkApproveData({ ids: [], nonApprovable: [], totalSelected: 0 });
+      }
+    }
   };
 
   const handleEdit = (log) => {
@@ -564,6 +581,16 @@ const StockLogRecords = () => {
                 </button>
               </div>
             </div>
+
+            <OtpModal
+              isOpen={showOtpModal}
+              onClose={() => {
+                setShowOtpModal(false);
+                setSelectedLogId(null);
+                setBulkApproveData({ ids: [], nonApprovable: [], totalSelected: 0 });
+              }}
+              onVerified={handleOtpVerified}
+            />
 
             {/* Bulk Actions */}
             {selectedRecords.length > 0 && (
@@ -984,7 +1011,7 @@ const StockLogRecords = () => {
                                       }`}
                                     title={
                                       isApproveDisabled
-                                        ? 'Cannot approve - Stock not added'
+                                        ? 'Cannot approve - Stock already added'
                                         : 'Approve'
                                     }
                                   >

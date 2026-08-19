@@ -4,7 +4,7 @@ import axios from 'axios';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { FaSpinner, FaCheckCircle, FaSearch } from 'react-icons/fa';
-import { BASE_URL } from '../constant/index.js';
+import { BASE_URL, LOCAL_STORAGE_KEY } from '../constant/index.js';
 
 const EMPTY_FORM = {
   fabricNumber: '',
@@ -170,6 +170,13 @@ const FabricCard = ({ item, isSelected, onClick }) => (
 /* ── Main component ─────────────────────────────────────── */
 const AddStockWithStyleNumber = ({ session }) => {
   const { stock, fetchStock } = useGlobalContext();
+  const [localStorageData, setLocalStorageData] = useState({
+    employeeNumber: '',
+    source: '',
+    sessionId: null,
+    totalAddedFabric: 0,
+    whitelistedUser: null,
+  });
 
   // Search mode: 'style' or 'fabric'
   const [searchMode, setSearchMode] = useState('style'); // 'style' | 'fabric'
@@ -214,6 +221,50 @@ const AddStockWithStyleNumber = ({ session }) => {
     () => stock.find((item) => Number(item.fabricNumber) === Number(selectedFabricNumber)),
     [stock, selectedFabricNumber]
   );
+
+  // fetch locale storage
+  // fetch locale storage
+  const fetchLocalStorageData = () => {
+    try {
+      const data = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (data) {
+        const parsedData = JSON.parse(data);
+        console.log('Fetched from localStorage:', parsedData);
+        setLocalStorageData(parsedData);
+      }
+    } catch (error) {
+      console.error('Error fetching localStorage data:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchLocalStorageData();
+  }, []);
+  // update total added fabrics
+
+  const updateAddedFabric = () => {
+    setLocalStorageData((prev) => {
+      const newTotal = (prev.totalAddedFabric || 0) + 1;
+      const updatedData = {
+        ...prev,
+        totalAddedFabric: newTotal,
+      };
+
+      // Save to localStorage
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedData));
+        console.log('Saved to localStorage:', updatedData);
+      } catch (error) {
+        console.error('Error saving to localStorage:', error);
+      }
+
+      return updatedData;
+    });
+  };
+
+  useEffect(() => {
+    console.log('localStorageData updated:', localStorageData);
+  }, [localStorageData]);
 
   // hasRelation depends only on loadingRelation — not shared loading state
   const hasRelation = !loadingRelation && relationDetails?.fabric_in_meter > 0;
@@ -478,6 +529,7 @@ const AddStockWithStyleNumber = ({ session }) => {
 
       try {
         await axios.post(`${BASE_URL}/verify-stocks`, payloadForStockVerifyRecord);
+        updateAddedFabric();
       } catch (error) {
         console.error('Failed to create verify stocks error', error);
         // Don't fail the main operation if verification fails
@@ -541,10 +593,16 @@ const AddStockWithStyleNumber = ({ session }) => {
                 </svg>
               </div>
               <div>
-                <h1 className="text-xl font-bold text-slate-800">Add Fabric Stock</h1>
-                <p className="text-sm text-slate-500">
-                  Search by style number or direct fabric number
-                </p>
+                <h1 className="text-xl font-bold text-slate-800">
+                  Add Fabric Stock.{' '}
+                  <span className="bg-green-200 text-green-800 py-2 px-4 mx-2 rounded-full text-center">
+                    {' '}
+                    {localStorageData.totalAddedFabric}
+                  </span>
+                  <span className="font-normal text-[14px]">
+                    {localStorageData.totalAddedFabric > 1 ? 'fabrics' : 'fabric'} added.
+                  </span>
+                </h1>
               </div>
             </div>
             {(styleNumber || directFabricNumber || selectedFabricNumber) && (

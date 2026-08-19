@@ -105,6 +105,7 @@ const Session = ({ onSessionCreated }) => {
       source,
       sessionId: Date.now(),
       whitelistedUser: whitelistCheck?.user || null,
+      totalAddedFabric: 0,
     };
 
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(payload));

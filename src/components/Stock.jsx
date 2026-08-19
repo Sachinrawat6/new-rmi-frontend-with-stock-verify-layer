@@ -554,7 +554,10 @@ const Stock = () => {
                         <button
                           onClick={() => {
                             // Your collapse logic here
-                            // Example: setExpandedItems(prev => ({ ...prev, [curStock.fabricNumber]: false }))
+                            setExpandedItems((prev) => ({
+                              ...prev,
+                              [curStock.fabricNumber]: false,
+                            }));
                           }}
                           className="absolute top-2 right-4 text-gray-400 hover:text-gray-600 transition-colors duration-200"
                           aria-label="Collapse"
