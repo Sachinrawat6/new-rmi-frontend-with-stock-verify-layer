@@ -41,6 +41,7 @@ import StockLogRecords from './pages/StockLogRecords';
 import Session from './components/Session';
 import UserManagement from './pages/WhitelistedUserManagement';
 import BlockedStockDays from './pages/BlockedStockDays';
+import ScanAndShipFabric from './pages/ScanAndShipFabric';
 
 const AppContent = () => {
   const { user, setUser } = useGlobalContext();
@@ -365,6 +366,15 @@ const AppContent = () => {
             element={
               <ProtectedRoute user={user}>
                 <BlockedStockDays />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/scan-and-ship"
+            element={
+              <ProtectedRoute user={user}>
+                <ScanAndShipFabric />
               </ProtectedRoute>
             }
           />

@@ -133,6 +133,12 @@ const Sidebar = ({ isAuthenticated, user, setUser, onLogout }) => {
           category: 'Transactions',
         },
         {
+          name: 'Ship By QR',
+          icon: FaShippingFast,
+          path: '/scan-and-ship',
+          category: 'Transactions',
+        },
+        {
           name: 'Accessory Update',
           icon: FaBoxOpen,
           path: '/accessory-update',
