@@ -3,6 +3,7 @@ import { useGlobalContext } from './context/StockContextProvider';
 import axios from 'axios';
 import { BASE_URL } from '../constant/index.js';
 import { ProductStyleImages } from 'react-product-style-images';
+import { fetchFabricStyleMappingFromGoogleSheet } from '../service/GoogleSheet.services.js';
 
 const Stock = () => {
   const { stock, stockLoading } = useGlobalContext();
@@ -11,6 +12,8 @@ const Stock = () => {
   const [inputValue, setInputValue] = useState('');
   const [expandedItems, setExpandedItems] = useState({});
   const [updating, setUpdating] = useState(false);
+  const [googleSheetLoading, setGoogleSheetLoading] = useState(false);
+  const [fabricStyleMapping, setFabricStyleMapping] = useState([]);
 
   // Filter states
   const [filters, setFilters] = useState({
@@ -25,6 +28,27 @@ const Stock = () => {
   // CSV export - how many top fabrics (by available stock) to include
   const [exportCount, setExportCount] = useState('50');
   const [customExportCount, setCustomExportCount] = useState('');
+
+  const fetchDataFromGoogleSheet = async () => {
+    setGoogleSheetLoading(true);
+    try {
+      const [fabricStyleMappings] = await Promise.all([fetchFabricStyleMappingFromGoogleSheet()]);
+
+      setFabricStyleMapping(fabricStyleMappings);
+    } catch (error) {
+      console.error('Failed to fetch google sheet data error::', error);
+    } finally {
+      setGoogleSheetLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDataFromGoogleSheet();
+  }, [stock]); // Fetch data whenever stock changes
+
+  useEffect(() => {
+    fetchDataFromGoogleSheet();
+  }, []);
 
   const itemsPerPage = 50;
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -187,11 +211,34 @@ const Stock = () => {
     URL.revokeObjectURL(url);
   }, [filteredData, exportCount, customExportCount]);
 
+  // updating stocks
+
+  const updateStock = async () => {
+    try {
+      setUpdating(true);
+      const payload = fabricStyleMapping.map((item) => ({
+        fabricNumber: item.fabricNo,
+        styleNumbers: item.styleNumbers,
+        fabricName: item.fabricName,
+        vendor_source: item.vendorSource,
+        blocked_stock_days: item.blockedDays,
+      }));
+
+      const response = await axios.post(`${BASE_URL}/stock/create`, payload);
+
+      console.log('Stock updated successfully:', response.data);
+    } catch (error) {
+      console.error('Error updating stock:', error);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [currentPage]);
 
-  if (stockLoading) {
+  if (stockLoading || googleSheetLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-screen space-y-4 bg-gray-50">
         <div className="animate-spin rounded-full h-14 w-14 border-4 border-blue-600 border-t-transparent"></div>
@@ -323,6 +370,14 @@ const Stock = () => {
                     />
                   </svg>
                   Export CSV
+                </button>
+                {/* update fabric numbers */}
+                <button
+                  onClick={updateStock}
+                  disabled={fabricStyleMapping.length === 0}
+                  className="px-4 py-2 text-sm font-medium rounded-lg bg-yellow-600 text-white hover:bg-yellow-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-200 flex items-center gap-2"
+                >
+                  Update Fabric Numbers
                 </button>
               </div>
             </div>

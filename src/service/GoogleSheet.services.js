@@ -1,10 +1,21 @@
 import axios from 'axios';
+import {
+  GOOGLE_SHEET_API_KEY,
+  GOOGLE_SHEET_BASE_URL,
+  GOOGLE_SHEET_ID,
+  GOOGLE_SHEET_FABRIC_RATE_RANGE,
+  GOOGLE_SHEET_FABRIC_AVERAGE_RANGE,
+  GOOGLE_SHEET_FABRIC_NO_RANGE,
+  GOOGLE_SHEET_COLORS_RANGE,
+  GOOGLE_SHEET_COORDS_STYLE_RANGE,
+  GOOGLE_SHEET_FABRIC_STYLE_MAPPING_RANGE,
+} from '../constant';
 const fetchFabricDataFromGoogleSheet = async () => {
   try {
-    const sheetId = '1SIP3Glxo5vkL0Jvx9ulj0p6xZoOh0ruzRtIqzldmb8E';
-    const apiKey = 'AIzaSyAGjWAyG29vKBgiYVSXCn08cu5ym6FwiQs';
-    const range = 'Fabric Rate!A1:J';
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?key=${apiKey}`;
+    const sheetId = GOOGLE_SHEET_ID;
+    const apiKey = GOOGLE_SHEET_API_KEY;
+    const range = GOOGLE_SHEET_FABRIC_RATE_RANGE;
+    const url = `${GOOGLE_SHEET_BASE_URL}/${sheetId}/values/${range}?key=${apiKey}`;
 
     const response = await axios.get(url);
 
@@ -47,16 +58,19 @@ const fetchFabricDataFromGoogleSheet = async () => {
 
 const fetchFabricNoFromFabricAverageSheet = async () => {
   try {
-    const sheetId = '1SIP3Glxo5vkL0Jvx9ulj0p6xZoOh0ruzRtIqzldmb8E';
-    const apiKey = 'AIzaSyAGjWAyG29vKBgiYVSXCn08cu5ym6FwiQs';
-    const range = 'Fabric Average Sheet!A1:L';
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?key=${apiKey}`;
+    const sheetId = GOOGLE_SHEET_ID;
+    const apiKey = GOOGLE_SHEET_API_KEY;
+    const range = GOOGLE_SHEET_FABRIC_AVERAGE_RANGE;
+    const url = `${GOOGLE_SHEET_BASE_URL}/${sheetId}/values/${range}?key=${apiKey}`;
 
     const response = await axios.get(url);
 
+    const rows = response.data.values || [];
     const fabrics = [];
 
-    for (let i = 1; i < response.data.values.length; i++) {
+    const hasValue = (v) => v !== undefined && v !== null && String(v).trim() !== '';
+
+    for (let i = 1; i < rows.length; i++) {
       const [
         style_number,
         pattern_number,
@@ -70,9 +84,12 @@ const fetchFabricNoFromFabricAverageSheet = async () => {
         fabric_2_image,
         fabric_3_no,
         fabric_3_name,
-      ] = response.data.values[i];
+      ] = rows[i];
 
-      fabrics.push({
+      // fabric 1 nahi hai to poori row skip
+      if (!hasValue(fabric_1_no)) continue;
+
+      const fabric = {
         style_number,
         pattern_number,
         article_type,
@@ -80,18 +97,28 @@ const fetchFabricNoFromFabricAverageSheet = async () => {
         fabric_1_no,
         fabric_1_name,
         fabric_1_image,
-        fabric_2_no,
-        fabric_2_name,
-        fabric_2_image,
-        fabric_3_no,
-        fabric_3_name,
-      });
+      };
+
+      // fabric 2 sirf tab add ho jab uska number ho
+      if (hasValue(fabric_2_no)) {
+        fabric.fabric_2_no = fabric_2_no;
+        fabric.fabric_2_name = fabric_2_name;
+        fabric.fabric_2_image = fabric_2_image;
+      }
+
+      // fabric 3 sirf tab add ho jab uska number ho
+      if (hasValue(fabric_3_no)) {
+        fabric.fabric_3_no = fabric_3_no;
+        fabric.fabric_3_name = fabric_3_name;
+      }
+
+      fabrics.push(fabric);
     }
 
     return fabrics;
   } catch (error) {
     console.error(
-      'Failed to fetch fabric no data from fabric average  google sheet :: ',
+      'Failed to fetch fabric no data from fabric average google sheet :: ',
       error?.message
     );
     throw error;
@@ -100,10 +127,10 @@ const fetchFabricNoFromFabricAverageSheet = async () => {
 
 const fetchFabricNoFromStylwise = async () => {
   try {
-    const sheetId = '1SIP3Glxo5vkL0Jvx9ulj0p6xZoOh0ruzRtIqzldmb8E';
-    const apiKey = 'AIzaSyAGjWAyG29vKBgiYVSXCn08cu5ym6FwiQs';
-    const range = 'Stylewise New Fabric No!A1:L';
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?key=${apiKey}`;
+    const sheetId = GOOGLE_SHEET_ID;
+    const apiKey = GOOGLE_SHEET_API_KEY;
+    const range = GOOGLE_SHEET_FABRIC_NO_RANGE;
+    const url = `${GOOGLE_SHEET_BASE_URL}/${sheetId}/values/${range}?key=${apiKey}`;
 
     const response = await axios.get(url);
 
@@ -143,10 +170,10 @@ const fetchFabricNoFromStylwise = async () => {
 
 const fetchColorsFromGoogleSheet = async () => {
   try {
-    const sheetId = '1SIP3Glxo5vkL0Jvx9ulj0p6xZoOh0ruzRtIqzldmb8E';
-    const apiKey = 'AIzaSyAGjWAyG29vKBgiYVSXCn08cu5ym6FwiQs';
-    const range = 'catalogue tracker!D1:F';
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?key=${apiKey}`;
+    const sheetId = GOOGLE_SHEET_ID;
+    const apiKey = GOOGLE_SHEET_API_KEY;
+    const range = GOOGLE_SHEET_COLORS_RANGE;
+    const url = `${GOOGLE_SHEET_BASE_URL}/${sheetId}/values/${range}?key=${apiKey}`;
 
     const response = await axios.get(url);
     const colors = [];
@@ -172,10 +199,10 @@ const fetchColorsFromGoogleSheet = async () => {
 
 const fetchCoordsStyleFromGoogleSheet = async () => {
   try {
-    const sheetId = '1SIP3Glxo5vkL0Jvx9ulj0p6xZoOh0ruzRtIqzldmb8E';
-    const apiKey = 'AIzaSyAGjWAyG29vKBgiYVSXCn08cu5ym6FwiQs';
-    const range = 'Coords data!A1:C';
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?key=${apiKey}`;
+    const sheetId = GOOGLE_SHEET_ID;
+    const apiKey = GOOGLE_SHEET_API_KEY;
+    const range = GOOGLE_SHEET_COORDS_STYLE_RANGE;
+    const url = `${GOOGLE_SHEET_BASE_URL}/${sheetId}/values/${range}?key=${apiKey}`;
 
     const response = await axios.get(url);
     const coords = [];
@@ -199,10 +226,43 @@ const fetchCoordsStyleFromGoogleSheet = async () => {
   }
 };
 
+const fetchFabricStyleMappingFromGoogleSheet = async () => {
+  try {
+    const sheetId = GOOGLE_SHEET_ID;
+    const apiKey = GOOGLE_SHEET_API_KEY;
+    const range = GOOGLE_SHEET_FABRIC_STYLE_MAPPING_RANGE;
+    const url = `${GOOGLE_SHEET_BASE_URL}/${sheetId}/values/${range}?key=${apiKey}`;
+
+    const response = await axios.get(url);
+    const fabricStyleMappings = [];
+
+    for (let i = 1; i < response.data.values.length; i++) {
+      const [fabric_name, fabric_no, style_numbers, vendor_source, blocked_days] =
+        response.data.values[i];
+      if (!fabric_no) continue;
+
+      fabricStyleMappings.push({
+        fabricNo: Number(fabric_no),
+        styleNumbers: style_numbers ? style_numbers.split(',').map((s) => Number(s)) : [],
+        fabricName: fabric_name?.trim(),
+        vendorSource: vendor_source?.trim(),
+        blockedDays: Number(blocked_days),
+      });
+    }
+
+    // console.log('Fabric Style Mappings fetched from Google Sheet :: ', fabricStyleMappings);
+    return fabricStyleMappings;
+  } catch (error) {
+    console.error('Failed to fetch fabric style mappings from Google Sheet :: ', error?.message);
+    throw error;
+  }
+};
+
 export {
   fetchFabricDataFromGoogleSheet,
   fetchFabricNoFromFabricAverageSheet,
   fetchFabricNoFromStylwise,
   fetchColorsFromGoogleSheet,
   fetchCoordsStyleFromGoogleSheet,
+  fetchFabricStyleMappingFromGoogleSheet,
 };
