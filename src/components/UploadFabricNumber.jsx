@@ -87,7 +87,7 @@ const StyleUploader = () => {
             };
           });
 
-          // 🔥 FINAL FIX → proper body
+          //  FINAL FIX → proper body
           const response = await fetch(`${API_BASE_URL}/style-details`, {
             method: 'POST',
             headers: {

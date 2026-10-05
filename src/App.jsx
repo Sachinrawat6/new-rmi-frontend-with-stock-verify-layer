@@ -42,6 +42,7 @@ import Session from './components/Session';
 import UserManagement from './pages/WhitelistedUserManagement';
 import BlockedStockDays from './pages/BlockedStockDays';
 import ScanAndShipFabric from './pages/ScanAndShipFabric';
+import Setting from './pages/Setting';
 
 const AppContent = () => {
   const { user, setUser } = useGlobalContext();
@@ -382,6 +383,7 @@ const AppContent = () => {
           {/* Documentation Route - Public access */}
           <Route path="/docs" element={<DashboardInstructions />} />
           <Route path="/test" element={<Test />} />
+          <Route path="/settings" element={<Setting />} />
 
           <Route path="*" element={user ? <Stock /> : <Login setUser={setUser} />} />
         </Routes>

@@ -704,11 +704,38 @@ const LowStockInventory = () => {
         }
         // If both are false or undefined, use stock-based logic
         else {
-          virtualStock = fabrics.every((f) => f.availableStock >= 5) ? 100 : 0;
+          virtualStock = fabrics.every((f) => {
+            const fabricName = f.fabricName?.toLowerCase() || '';
+            const availableStock = Number(f.availableStock) || 0;
+
+            const isSpecialFabric =
+              fabricName.includes('sequence') ||
+              fabricName.includes('sequenc') ||
+              fabricName.includes('brocade') ||
+              fabricName.includes('brocades');
+
+            return isSpecialFabric ? availableStock >= 1 : availableStock >= 5;
+          })
+            ? 100
+            : 0;
         }
       } else {
         // No overwrite status found, use stock-based logic
-        virtualStock = fabrics.every((f) => f.availableStock >= 5) ? 100 : 0;
+        // virtualStock = fabrics.every((f) => f.availableStock >= 5) ? 100 : 0;
+        virtualStock = fabrics.every((f) => {
+          const fabricName = f.fabricName?.toLowerCase() || '';
+          const availableStock = Number(f.availableStock) || 0;
+
+          const isSpecialFabric =
+            fabricName.includes('sequence') ||
+            fabricName.includes('sequenc') ||
+            fabricName.includes('brocade') ||
+            fabricName.includes('brocades');
+
+          return isSpecialFabric ? availableStock >= 1 : availableStock >= 5;
+        })
+          ? 100
+          : 0;
       }
 
       for (const sku of omsSkus) {

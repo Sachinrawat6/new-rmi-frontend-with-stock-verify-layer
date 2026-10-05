@@ -50,7 +50,9 @@ import {
   FaTimes,
   FaArrowLeft,
   FaArrowRight,
+  FaAssistiveListeningSystems,
 } from 'react-icons/fa';
+import { IoSettingsOutline } from 'react-icons/io5';
 import { toast } from 'react-toastify';
 
 const Sidebar = ({ isAuthenticated, user, setUser, onLogout }) => {
@@ -77,6 +79,7 @@ const Sidebar = ({ isAuthenticated, user, setUser, onLogout }) => {
       Uploads: { icon: FaUpload, color: 'yellow' },
       Monitoring: { icon: FaEye, color: 'red' },
       Resources: { icon: FaBook, color: 'teal' },
+      Settings: { icon: IoSettingsOutline, color: 'white' },
     }),
     []
   );
@@ -115,6 +118,12 @@ const Sidebar = ({ isAuthenticated, user, setUser, onLogout }) => {
           path: '/docs',
           category: 'Resources',
           external: true,
+        },
+        {
+          name: 'Data Synchronization',
+          icon: IoSettingsOutline,
+          path: '/settings',
+          category: 'Settings',
         },
       ],
 
